@@ -3,7 +3,7 @@ import math
 import random
 from bpy.props import IntProperty
 
-# Definiere die Eigenschaften für die Szene
+# Properties
 
 bpy.types.Scene.additional_preframes = IntProperty(
     name="Add Preframes",
@@ -388,7 +388,7 @@ class GRAPH_OT_add_next_keys(bpy.types.Operator):
         
         # Überprüfen, ob wir im richtigen Bereich sind.
         if area.type != 'GRAPH_EDITOR':
-            self.report({'WARNING'}, "Muss im Graph-Editor-Bereich ausgeführt werden.")
+            self.report({'WARNING'}, "Graph editor operation")
             return {'CANCELLED'}
 
         # Iteriere durch alle ausgewählten Objekte.
@@ -445,7 +445,7 @@ class GRAPH_OT_subtract_keys(bpy.types.Operator):
         area = context.area
         
         if area.type != 'GRAPH_EDITOR':
-            self.report({'WARNING'}, "Muss im Graph-Editor-Bereich ausgeführt werden.")
+            self.report({'WARNING'}, "Graph editor operation")
             return {'CANCELLED'}
 
         for obj in context.selected_objects:
@@ -498,7 +498,7 @@ class BONES_OT_toggle_unselected_bones(bpy.types.Operator):
             self.report({'INFO'}, "Selected bones")
         else:
             self.report({'INFO'}, "All bones")
-        self.report({'INFO'}, "Nicht ausgewählte Bones wurden isoliert.")
+        self.report({'INFO'}, "No selected bones isolated")
         
         return {'FINISHED'}
 
