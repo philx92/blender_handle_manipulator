@@ -15,7 +15,7 @@ changes:
 - isolate bones option: basically toggles SHIFT + H and ALT + H in 3d viewport (useful when you have a dopesheet window with all keyed bones somewhere, select them and quickly hide all bones which have no keyframe)
 - keep framerange: untoggle for selection dependant framerange. When animation is NOT playing the numpad selections change the cursor position. When animation is playing every operator sets the timelines around the selection. Buffer frames can be customized with preframe and postframe. When only one key selection per curve, the timeline reference extends to neighbouring keyframes. Toggle "Keep Framerange" to disable the whole option (useful in small looping animations)
 - move to cursor operator: Move selected keys to timeline cursor. Useful for reversing the random x-value operation
-- decimate keyframes operator: Useful for quickly decimating baked animations. select the curve extremes to preserve the shape and click this button (Nothing fancy, just a quick decimate by error operation)
+- decimate keyframes operator: Useful for quickly decimating densely baked animations. select the curve extremes to preserve the shape and click this button (Nothing fancy, just a quick decimate by error operation)
 
 - rotation strength is now also dependant on next keyframe
 - there are still some bugs with the cursor jump to selection
