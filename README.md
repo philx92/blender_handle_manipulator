@@ -4,7 +4,7 @@ v1.1
 
 changes:
 - added icons
-- quick selection navigation with NumPad_1, 2, 3 and 5: 1 selects first frame of f-curves and you can switch them with NumPad_3. 5 is adding to selection to the right. 2 is deleting selection from the right
+- quick selection navigation with NumPad_1, 2, 3 and 5: Toggle through them. 5 is adding to selection on the right. 2 is deleting selection from the right
 - slide operator: Like extend on individual origins without changing direction 
 - flatten operator: Reverse to rotate (useful when you have extreme random rotations and you dont wanna give up the motion)
 - scale: How often do you want to scale relative to the first selected key in blender but cant make the timeline cursor stop while playing the animation?
