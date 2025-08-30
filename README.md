@@ -8,7 +8,7 @@ changes:
 - slide operator: Like extend on individual origins without changing direction 
 - flatten operator: Reverse to rotate (useful when you have extreme random rotations and you dont wanna give up the motion)
 - scale: How often do you want to scale relative to the first selected key in blender but cant make the timeline cursor stop while playing the animation?
-- move keyframe in x: Not very useful but why not. OCD kicked in
+- move keyframe in x: Not very useful but why not. OCD 
 - Random Operators: Extrusion, rotation, x-value, y-valus. Self explanatory
 - On bones option: untoggled: randomizes every selected keyframe. toggled: randomization refers to the whole bone as one (Useful for quick timing randomization between different bones for example with x-value randomization)
 
