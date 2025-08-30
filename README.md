@@ -17,5 +17,5 @@ changes:
 - move to cursor operator: Move selected keys to timeline cursor. Useful for reversing the random x-value operation
 - decimate keyframes operator: Useful for quickly decimating densely baked animations. select the curve extremes to preserve the shape and click this button (Nothing fancy, just a quick decimate by error operation)
 
-- rotation strength is now also dependant on next keyframe
+- rotation strength is now also dependant on next keyframe value
 - there are still some bugs with the cursor jump to selection
