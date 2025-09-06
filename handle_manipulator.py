@@ -28,7 +28,7 @@ bpy.types.Scene.use_bone_randomization = bpy.props.BoolProperty(
 bl_info = {
     "name": "Handle Manipulator",
     "author": "Gemini",
-    "version": (1, 0),
+    "version": (1, 2),
     "blender": (4, 5, 0),
     "location": "Graph Editor > Sidebar",
     "description": "Manipulate selected keyframe handles.",
@@ -38,8 +38,7 @@ bl_info = {
 
 bpy.types.Scene.keep_framerange = bpy.props.BoolProperty(
     name="Keep Framerange",
-    description="Selection dependent framerange for functions while animation is running. \n" \
-    "Toggle if you want to keep default framerange",
+    description="Selection dependant framerange while animation is running by default. Toggle on for normal framerange",
     default=False 
 )
 
@@ -68,7 +67,17 @@ bpy.types.Scene.is_bones_isolated = bpy.props.BoolProperty(
     "\n(Fast Shift+H and Alt+H in 3D-View)",
     update=update_isolate_bones
 )
+class OBJECT_OT_toggle_bones_isolation(bpy.types.Operator):
+    """Isolate selected bones in Viewport"""
+    bl_idname = "object.toggle_bones_isolation"
+    bl_label = "Isolate Bones"
+    bl_options = {'REGISTER', 'UNDO'}
 
+    def execute(self, context):
+        context.scene.is_bones_isolated = not context.scene.is_bones_isolated
+        self.report({'INFO'}, f"Bones isolation: {'On' if context.scene.is_bones_isolated else 'Off'}")
+        return {'FINISHED'}
+    
 def filter_fcurves(self, context):
     selected_objects = bpy.context.selected_objects
     
@@ -362,7 +371,7 @@ class GRAPH_OT_select_previous_keys(bpy.types.Operator):
 
 
 class GRAPH_OT_add_next_keys(bpy.types.Operator):
-    """add right keyframe to selection"""
+    """add keyframe to selection on the right"""
     bl_idname = "graph.add_next_keys"
     bl_label = "Keyframe rechts hinzufügen"
     bl_options = {'UNDO'}
@@ -423,7 +432,7 @@ class GRAPH_OT_add_next_keys(bpy.types.Operator):
 
 
 class GRAPH_OT_subtract_keys(bpy.types.Operator):
-    """subtract right keyframe from selection"""
+    """subtract keyframe from selection on the right"""
     bl_idname = "graph.subtract_keys"
     bl_label = "Keyframe rechts entfernen"
     bl_options = {'UNDO'}
@@ -507,8 +516,8 @@ class GRAPH_OT_decimate_unselected(bpy.types.Operator):
     bl_idname = "graph.decimate_unselected"
     bl_label = "Decimate Unselected Keyframes"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Deletes unselected keys while preserving the curve \n" \
-    "(Fast decimate by error operator with factor 10 on unselected keyframes)"
+    bl_description = "Decimate dense keyframes, preserving selected" 
+    
 
     @classmethod
     def poll(cls, context):
@@ -559,9 +568,9 @@ class GRAPH_OT_decimate_unselected(bpy.types.Operator):
 
 
 class GRAPH_OT_scale_keyframes_x(bpy.types.Operator):
-    """Scales keyframes relative to first selected keyframe on X-axis"""
+    """Scale keyframes X value, relative to leftmost selected keyframe"""
     bl_idname = "graph.scale_keyframes_x"
-    bl_label = "Scale"
+    bl_label = "Scale Keys"
     bl_options = {'REGISTER', 'UNDO'}
     
     _timer = None
@@ -576,16 +585,39 @@ class GRAPH_OT_scale_keyframes_x(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        # Überprüft, ob ein aktives Objekt mit Animationsdaten und ausgewählten F-Kurven vorhanden ist.
-        # Dann wird geprüft, ob mindestens ein Keyframe in diesen F-Kurven ausgewählt ist.
-        return (context.active_object and
+        if not (context.active_object and
                 context.active_object.animation_data and
                 context.active_object.animation_data.action and
-                context.selected_visible_fcurves and
-                any(kf.select_control_point for fc in context.selected_visible_fcurves for kf in fc.keyframe_points))
-
+                context.selected_visible_fcurves):
+            return False
+        
+        # Check if there's at least one fcurve with two or more selected keyframes
+        for fcurve in context.selected_visible_fcurves:
+            selected_keyframes_in_fcurve = [kf for kf in fcurve.keyframe_points if kf.select_control_point]
+            if len(selected_keyframes_in_fcurve) >= 2:
+                return True
+                
+        return False
+    
     def modal(self, context, event):
         if event.type == 'MOUSEMOVE':
+            # 1. Maus-Warping-Logik
+            window_width = context.window.width
+            mouse_x = event.mouse_x
+            
+            # Speichere die ursprüngliche Mausposition
+            original_mouse_x = mouse_x
+
+            if mouse_x < 5 or mouse_x > window_width - 5:
+                new_x = mouse_x
+                if mouse_x < 5:
+                    new_x = window_width - 10
+                else:
+                    new_x = 10
+                
+                self._first_mouse_x += new_x - mouse_x
+                context.window.cursor_warp(new_x, event.mouse_y)
+
             delta_x = event.mouse_x - self._first_mouse_x
             scale_factor = 1.0 + delta_x * 0.005
             
@@ -758,9 +790,9 @@ class GRAPH_OT_scale_keyframes_x(bpy.types.Operator):
 
 
 class GRAPH_OT_move_keyframes_x(bpy.types.Operator):
-    """Moves selected keyframes on X-axis"""
+    """Move keyframes X value"""
     bl_idname = "graph.move_keyframes_x"
-    bl_label = "Move"
+    bl_label = "Move keys"
     bl_options = {'REGISTER', 'UNDO'}
 
     _first_mouse_x = None
@@ -780,6 +812,24 @@ class GRAPH_OT_move_keyframes_x(bpy.types.Operator):
                 
     def modal(self, context, event):
         if event.type == 'MOUSEMOVE':
+            if event.type == 'MOUSEMOVE':
+                # 1. Maus-Warping-Logik
+                window_width = context.window.width
+                mouse_x = event.mouse_x
+                
+                # Speichere die ursprüngliche Mausposition
+                original_mouse_x = mouse_x
+
+                if mouse_x < 5 or mouse_x > window_width - 5:
+                    new_x = mouse_x
+                    if mouse_x < 5:
+                        new_x = window_width - 10
+                    else:
+                        new_x = 10
+                    
+                    self._first_mouse_x += new_x - mouse_x
+                    context.window.cursor_warp(new_x, event.mouse_y)
+
             delta_x = (event.mouse_x - self._first_mouse_x) * 0.1
             
             new_frame_positions = []
@@ -900,9 +950,8 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
     bl_idname = "object.rotate_keys"
     bl_label = "Rotate Keyframes"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Rotate handles towards f-curves next value. \n" \
-                 "Mousewheel for sensitivity. \n" \
-                 "No rotation if next and previous keyframe have the same values"
+    bl_description = "Mousewheel for sensitivity. Rotation dependant on the value of the next keyframe"
+                 
 
     _initial_keyframe_data = {}
     
@@ -1133,24 +1182,20 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
-#from math import copysign
 
-import bpy
 
 class OBJECT_OT_flatten_keys(bpy.types.Operator):
     bl_idname = "object.flatten_keys"
     bl_label = "Flatten Keys"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Flatten handles" 
-                   
-
+    bl_description = "Flatten, or exaggerate handle rotation"
+                    
     _initial_keyframe_data = {}
     _initial_mouse_x = None
     _sensitivity = 0.002
     
-    _flatten_factor = 0.0
+    _initial_flatten_factor = 0.0
 
-    # Neue Variablen zum Speichern des ursprünglichen Frame-Bereichs
     _initial_frame_start = 0
     _initial_frame_end = 0
 
@@ -1163,7 +1208,8 @@ class OBJECT_OT_flatten_keys(bpy.types.Operator):
                 len([kf for fc in context.selected_visible_fcurves for kf in fc.keyframe_points if kf.select_control_point]) > 0)
 
     def _apply_flattening(self, context, flatten_factor):
-        flatten_factor = max(0.0, min(1.0, flatten_factor))
+        # **ÄNDERUNG HIER:** Erlaubt negative Werte, begrenzt positiv bei 1.0
+        flatten_factor = min(1.0, flatten_factor)
 
         for (data_path, keyframe_index, array_index), initial_data in self._initial_keyframe_data.items():
             fcurve = None
@@ -1202,14 +1248,45 @@ class OBJECT_OT_flatten_keys(bpy.types.Operator):
                 area.tag_redraw()
 
     def modal(self, context, event):
+        # **ÄNDERUNG HIER:** Erlaubt negative Werte, begrenzt positiv bei 1.0
         _flatten_factor = self._initial_flatten_factor + (event.mouse_x - self._initial_mouse_x) * self._sensitivity
-        _flatten_factor = max(0.0, min(1.0, _flatten_factor))
+        _flatten_factor = min(1.0, _flatten_factor)
         
         if event.type == 'MOUSEMOVE':
-            self._apply_flattening(context, _flatten_factor)
-            self.report({'INFO'}, f"Flatten Factor: {int(_flatten_factor * 100)}%")
-            return {'RUNNING_MODAL'}
+            # Hol dir die Breite des Fensters, in dem der Operator aktiv ist.
+            # Anstatt context.window.width, nutze besser die Bereichsgröße für mehr Flexibilität
+            window_width = context.window.width
+        
+            # Hol dir die Mausposition im Fenster-Koordinatensystem
+            mouse_x = event.mouse_x
             
+            # Überprüfe, ob die Maus den linken oder rechten Rand erreicht hat (Puffer von 5 Pixeln)
+            if mouse_x < 5 or mouse_x > window_width - 5:
+                new_x = mouse_x
+                if mouse_x < 5:
+                    # Maus ist am linken Rand, teleportiere sie zum rechten Rand
+                    new_x = window_width - 10
+                else:
+                    # Maus ist am rechten Rand, teleportiere sie zum linken Rand
+                    new_x = 10
+                    
+                # Aktualisiere die Anfangsmausposition, um den Sprung auszugleichen
+                self._initial_mouse_x += new_x - mouse_x
+
+                # Setze den Cursor an die neue Position
+                context.window.cursor_warp(new_x, event.mouse_y)
+                
+            # Berechne die Delta-Werte basierend auf der aktuellen Mausposition und der initialen Mausposition
+            # Die initial_mouse_x wird durch das Warping korrekt angepasst,
+            # sodass die Bewegung nahtlos weiterläuft.
+            delta_x = event.mouse_x - self._initial_mouse_x
+            
+            _flatten_factor = self._initial_flatten_factor + delta_x * self._sensitivity
+            _flatten_factor = min(1.0, _flatten_factor)
+            
+            self._apply_flattening(context, _flatten_factor)
+            
+            return {'RUNNING_MODAL'}
         elif event.type == 'LEFTMOUSE':
             for (data_path, keyframe_index, array_index), initial_data in self._initial_keyframe_data.items():
                 fcurve = None
@@ -1222,13 +1299,12 @@ class OBJECT_OT_flatten_keys(bpy.types.Operator):
                     keyframe.handle_left_type = 'ALIGNED'
                     keyframe.handle_right_type = 'ALIGNED'
             
-            # Stelle den ursprünglichen Frame-Bereich wieder her
             context.scene.frame_start = self._initial_frame_start
             context.scene.frame_end = self._initial_frame_end
 
             context.window.cursor_set('DEFAULT')
             return {'FINISHED'}
-        
+            
         elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
             for (data_path, keyframe_index, array_index), initial_data in self._initial_keyframe_data.items():
                 fcurve = None
@@ -1246,7 +1322,6 @@ class OBJECT_OT_flatten_keys(bpy.types.Operator):
                     keyframe.handle_left_type = initial_data['handle_left_type']
                     keyframe.handle_right_type = initial_data['handle_right_type']
             
-            # Stelle den ursprünglichen Frame-Bereich wieder her
             context.scene.frame_start = self._initial_frame_start
             context.scene.frame_end = self._initial_frame_end
             
@@ -1256,10 +1331,7 @@ class OBJECT_OT_flatten_keys(bpy.types.Operator):
         return {'RUNNING_MODAL'}
     
     def invoke(self, context, event):
-        self.report({'INFO'}, f"Sensitivity: {self._sensitivity:.3f} ")
-        
-        
-        epsilon = 1e-6 
+        epsilon = 1e-6
         selected_keyframes = []
         for fcurve in context.selected_visible_fcurves:
             for keyframe in fcurve.keyframe_points:
@@ -1272,19 +1344,18 @@ class OBJECT_OT_flatten_keys(bpy.types.Operator):
 
         self._initial_keyframe_data.clear()
         
-        # Speichere den ursprünglichen Frame-Bereich am Anfang
         self._initial_frame_start = context.scene.frame_start
         self._initial_frame_end = context.scene.frame_end
         
-        # Passe den Frame-Bereich an die Auswahl an
         if not context.scene.keep_framerange and context.screen.is_animation_playing:
             set_timeline_range_to_selected(context)
             if context.screen.is_animation_playing:
                 context.scene.frame_current = context.scene.frame_start
 
         self._initial_mouse_x = event.mouse_x
+        self._flatten_factor = 0.0
         self._initial_flatten_factor = self._flatten_factor
-
+        
         for fcurve in context.selected_visible_fcurves:
             for keyframe_index, keyframe in enumerate(fcurve.keyframe_points):
                 if keyframe in selected_keyframes:
@@ -1304,18 +1375,26 @@ class OBJECT_OT_flatten_keys(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
 
+import bpy
+import math
+
+
+
 class OBJECT_OT_manipulate_handles(bpy.types.Operator):
     bl_idname = "object.handle_manipulator"
     bl_label = "Manipulate Handles"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Extrude both Handles"
+    bl_description = "Mousewheel for left or right. Extrude handles"
     
     _timer = None
     initial_mouse_x = None
+    _mode = 'LEFT_HANDLE' # Starte im linken Modus
     initial_handle_vectors = {}
     initial_handle_types = {}
     initial_keyframe_data = {}
-
+    _initial_frame_start = None
+    _initial_frame_end = None
+    
     @classmethod
     def poll(cls, context):
         return (context.active_object and
@@ -1323,144 +1402,158 @@ class OBJECT_OT_manipulate_handles(bpy.types.Operator):
                 context.active_object.animation_data.action and
                 context.selected_visible_fcurves and
                 len([kf for fc in context.selected_visible_fcurves for kf in fc.keyframe_points if kf.select_control_point]) > 0)
-
+    
     def modal(self, context, event):
         if event.type == 'MOUSEMOVE':
+            # Maus-Warping bleibt unverändert
             if event.mouse_x < 5 or event.mouse_x > context.window.width - 5:
                 if event.mouse_x < 5:
                     new_x = context.window.width - 10
                 else:
                     new_x = 10
-                
                 self.initial_mouse_x += (new_x - event.mouse_x)
                 context.window.cursor_warp(new_x, event.mouse_y)
-            delta_x = event.mouse_x - self.initial_mouse_x
-            factor = max(delta_x / 200.0, -1.0)
             
-            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_handle_vectors.items():
+            if event.mouse_y < 5 or event.mouse_y > context.window.height - 5:
+                if event.mouse_y < 5:
+                    new_y = context.window.height - 10
+                else:
+                    new_y = 10
+                self.initial_mouse_y += (new_y - event.mouse_y)
+                context.window.cursor_warp(event.mouse_x, new_y)
+
+            delta_x_px = event.mouse_x - self.initial_mouse_x
+            
+            for key, initial_data in self.initial_keyframe_data.items():
+                data_path, keyframe_index, array_index = key
+                
                 fcurve = None
                 for fc in context.active_object.animation_data.action.fcurves:
                     if fc.data_path == data_path and fc.array_index == array_index:
                         fcurve = fc
                         break
-
+                
                 if not fcurve:
                     continue
                 
                 keyframe = fcurve.keyframe_points[keyframe_index]
                 
-                vec_right_initial = initial_vectors['right']
-                length_right_initial = math.sqrt(vec_right_initial[0]**2 + vec_right_initial[1]**2)
-                
-                if length_right_initial > 0:
-                    new_length_right = length_right_initial * (1.0 + factor)
-                    new_x_right = keyframe.co[0] + vec_right_initial[0] / length_right_initial * new_length_right
-                    new_y_right = keyframe.co[1] + vec_right_initial[1] / length_right_initial * new_length_right
-                    keyframe.handle_right[0] = new_x_right
-                    keyframe.handle_right[1] = new_y_right
-
+                initial_vectors = self.initial_handle_vectors[key]
                 vec_left_initial = initial_vectors['left']
-                length_left_initial = math.sqrt(vec_left_initial[0]**2 + vec_left_initial[1]**2)
+                vec_right_initial = initial_vectors['right']
 
-                if length_left_initial > 0:
-                    new_length_left = length_left_initial * (1.0 + factor)
-                    new_x_left = keyframe.co[0] + vec_left_initial[0] / length_left_initial * new_length_left
-                    new_y_left = keyframe.co[1] + vec_left_initial[1] / length_left_initial * new_length_left
-                    keyframe.handle_left[0] = new_x_left
-                    keyframe.handle_left[1] = new_y_left
-            
+                # Berechne den Skalierungsfaktor
+                # Die 200 ist ein beliebiger Wert für die Empfindlichkeit, du kannst sie anpassen
+                factor = 1.0 + (delta_x_px / 200.0) 
+                
+                if self._mode == 'LEFT_HANDLE':
+                    # Skaliere den linken Handle
+                    new_vec_left_x = vec_left_initial[0] * factor
+                    new_vec_left_y = vec_left_initial[1] * factor
+                    keyframe.handle_left[0] = keyframe.co[0] + new_vec_left_x
+                    keyframe.handle_left[1] = keyframe.co[1] + new_vec_left_y
+                    
+                    # Setze den rechten Handle auf den ursprünglichen Zustand zurück
+                    keyframe.handle_right[0] = keyframe.co[0] + vec_right_initial[0]
+                    keyframe.handle_right[1] = keyframe.co[1] + vec_right_initial[1]
+
+                elif self._mode == 'RIGHT_HANDLE':
+                    # Skaliere den rechten Handle
+                    new_vec_right_x = vec_right_initial[0] * factor
+                    new_vec_right_y = vec_right_initial[1] * factor
+                    keyframe.handle_right[0] = keyframe.co[0] + new_vec_right_x
+                    keyframe.handle_right[1] = keyframe.co[1] + new_vec_right_y
+
+                    # Setze den linken Handle auf den ursprünglichen Zustand zurück
+                    keyframe.handle_left[0] = keyframe.co[0] + vec_left_initial[0]
+                    keyframe.handle_left[1] = keyframe.co[1] + vec_left_initial[1]
+
             for area in context.screen.areas:
                 if area.type in {'GRAPH_EDITOR', 'VIEW_3D'}:
                     area.tag_redraw()
-
+        
+        elif event.type in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}:
+            # Wechsle zwischen den Modi
+            self._mode = 'RIGHT_HANDLE' if self._mode == 'LEFT_HANDLE' else 'LEFT_HANDLE'
+            self.report({'INFO'}, f"{self._mode}")
+            self.initial_mouse_x = event.mouse_x
+            
         elif event.type == 'LEFTMOUSE':
-            for (data_path, keyframe_index, array_index), types in self.initial_handle_types.items():
+            # Bestätige die Änderungen
+            for key, types in self.initial_handle_types.items():
+                data_path, keyframe_index, array_index = key
                 fcurve = None
                 for fc in context.active_object.animation_data.action.fcurves:
                     if fc.data_path == data_path and fc.array_index == array_index:
                         fcurve = fc
                         break
-                
                 if fcurve:
                     keyframe = fcurve.keyframe_points[keyframe_index]
                     keyframe.interpolation = 'BEZIER'
-                    keyframe.handle_left_type = 'ALIGNED'
-                    keyframe.handle_right_type = 'ALIGNED'
-            
+                    keyframe.handle_left_type = 'ALIGNED' if keyframe.handle_left_type == 'FREE' else keyframe.handle_left_type
+                    keyframe.handle_right_type = 'ALIGNED' if keyframe.handle_right_type == 'FREE' else keyframe.handle_right_type
+
             context.scene.frame_start = self._initial_frame_start
             context.scene.frame_end = self._initial_frame_end
-                    
             context.window.cursor_set('DEFAULT')
             if self._timer:
                 context.window_manager.event_timer_remove(self._timer)
             return {'FINISHED'}
-        
-        
-
+            
         elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
-            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_handle_vectors.items():
+            # Abbrechen und die Handles auf den Ausgangszustand zurücksetzen
+            for key, initial_vectors in self.initial_handle_vectors.items():
+                data_path, keyframe_index, array_index = key
                 fcurve = None
                 for fc in context.active_object.animation_data.action.fcurves:
                     if fc.data_path == data_path and fc.array_index == array_index:
                         fcurve = fc
                         break
+                if fcurve:
+                    keyframe = fcurve.keyframe_points[keyframe_index]
+                    keyframe.handle_left[0] = keyframe.co[0] + initial_vectors['left'][0]
+                    keyframe.handle_left[1] = keyframe.co[1] + initial_vectors['left'][1]
+                    keyframe.handle_right[0] = keyframe.co[0] + initial_vectors['right'][0]
+                    keyframe.handle_right[1] = keyframe.co[1] + initial_vectors['right'][1]
 
-                if not fcurve:
-                    continue
-                
-                keyframe = fcurve.keyframe_points[keyframe_index]
-                
-                vec_right_initial = initial_vectors['right']
-                keyframe.handle_right[0] = keyframe.co[0] + vec_right_initial[0]
-                keyframe.handle_right[1] = keyframe.co[1] + vec_right_initial[1]
-
-                vec_left_initial = initial_vectors['left']
-                keyframe.handle_left[0] = keyframe.co[0] + vec_left_initial[0]
-                keyframe.handle_left[1] = keyframe.co[1] + vec_left_initial[1]
-                
-                types = self.initial_handle_types[(data_path, keyframe_index, array_index)]
-                keyframe.handle_left_type = types['left']
-                keyframe.handle_right_type = types['right']
+                    types = self.initial_handle_types[key]
+                    keyframe.handle_left_type = types['left']
+                    keyframe.handle_right_type = types['right']
             
             context.scene.frame_start = self._initial_frame_start
             context.scene.frame_end = self._initial_frame_end
-            
             context.window.cursor_set('DEFAULT')
             if self._timer:
                 context.window_manager.event_timer_remove(self._timer)
-            return {'CANCELLED'}        
-        
-        return {'RUNNING_MODAL'}
-    
-    def invoke(self, context, event):
-        if context.active_object is None or context.active_object.animation_data is None:
-            self.report({'WARNING'}, "No active object or animation data.")
             return {'CANCELLED'}
-
+            
+        return {'RUNNING_MODAL'}
+        
+    def invoke(self, context, event):
+        self.report({'INFO'}, f"{self._mode}")
         if context.active_object is None or context.active_object.animation_data is None:
             self.report({'WARNING'}, "Kein aktives Objekt oder keine Animationsdaten.")
             return {'CANCELLED'}
-
+        
         if not context.selected_visible_fcurves:
             self.report({'WARNING'}, "Keine F-Kurven im Graph Editor sichtbar und ausgewählt.")
             return {'CANCELLED'}
-        
+
         self._initial_frame_start = context.scene.frame_start
         self._initial_frame_end = context.scene.frame_end
-            
-        # --- NEUE FUNKTION HIER AUFRUFEN ---
+        
         if not context.scene.keep_framerange and context.screen.is_animation_playing:
             set_timeline_range_to_selected(context)
+            
+        if context.screen.is_animation_playing:
+            context.scene.frame_current = context.scene.frame_start
 
         self.initial_mouse_x = event.mouse_x
+        self.initial_mouse_y = event.mouse_y # Auch diese Zeile wieder eingefügt
+        self._mode = 'LEFT_HANDLE'
         self.initial_handle_vectors.clear()
         self.initial_handle_types.clear()
         self.initial_keyframe_data.clear()
-        
-        if context.screen.is_animation_playing:
-            # Cursor zum Start der Timeline springen lassen
-            context.scene.frame_current = context.scene.frame_start
-
         
         selected_keyframes_found = False
         for fcurve in context.selected_visible_fcurves:
@@ -1469,8 +1562,9 @@ class OBJECT_OT_manipulate_handles(bpy.types.Operator):
                     selected_keyframes_found = True
                     key = (fcurve.data_path, keyframe_index, fcurve.array_index)
                     
-                    self.initial_keyframe_data[key] = {
-                        'co_x': keyframe.co[0],
+                    self.initial_handle_vectors[key] = {
+                        'left': (keyframe.handle_left[0] - keyframe.co[0], keyframe.handle_left[1] - keyframe.co[1]),
+                        'right': (keyframe.handle_right[0] - keyframe.co[0], keyframe.handle_right[1] - keyframe.co[1]),
                     }
                     
                     self.initial_handle_types[key] = {
@@ -1478,27 +1572,26 @@ class OBJECT_OT_manipulate_handles(bpy.types.Operator):
                         'right': keyframe.handle_right_type
                     }
                     
-                    self.initial_handle_vectors[key] = {
-                        'left': (keyframe.handle_left[0] - keyframe.co[0], keyframe.handle_left[1] - keyframe.co[1]),
-                        'right': (keyframe.handle_right[0] - keyframe.co[0], keyframe.handle_right[1] - keyframe.co[1]),
+                    self.initial_keyframe_data[key] = {
+                        'co_x': keyframe.co[0],
+                        'co_y': keyframe.co[1],
                     }
 
         if not selected_keyframes_found:
             self.report({'WARNING'}, "Keine Keyframes in den aktiven, sichtbaren Kurven ausgewählt.")
             return {'CANCELLED'}
-
+        
         context.window.cursor_set('SCROLL_X')
-        self._timer = context.window_manager.event_timer_add(0.01, window=context.window)
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
+
 
 
 class OBJECT_OT_randomize_keys(bpy.types.Operator):
     bl_idname = "object.randomize_keys"
     bl_label = "Randomize Keyframes"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Randomize keyframe Y-Values. \n" \
-    "Mousewheel for seed"
+    bl_description = "Mousewheel for seed. Randomize keyframes Y-Value"
 
     _timer = None
     initial_mouse_x = None
@@ -1575,6 +1668,7 @@ class OBJECT_OT_randomize_keys(bpy.types.Operator):
                 
             base_divisor = 1000.0 if event.alt else 200.0
             delta_x = event.mouse_x - self.initial_mouse_x
+            delta_x = max(0.0, delta_x)
             power_exponent = 2.0
             abs_delta_x = abs(delta_x)
             strength = (abs_delta_x / base_divisor) ** power_exponent
@@ -1736,8 +1830,7 @@ class OBJECT_OT_random_x_pos(bpy.types.Operator):
     bl_idname = "object.random_x_pos"
     bl_label = "Randomize Keyframes"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Randomize keyframe X-Values. \n" \
-                     "Mousewheel for seed" 
+    bl_description = "Mousewheel for seed. Randomize keyframes X-Value"
                      
 
     _timer = None
@@ -1817,6 +1910,7 @@ class OBJECT_OT_random_x_pos(bpy.types.Operator):
                 
             base_divisor = 1000.0 if event.alt else 200.0
             delta_x = event.mouse_x - self.initial_mouse_x
+            delta_x = max(0.0, delta_x)
             power_exponent = 2.0
             strength = abs(delta_x / base_divisor) ** power_exponent
             strength = strength if delta_x >= 0 else -strength
@@ -1942,8 +2036,7 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
     bl_idname = "object.randomize_handle_rotation"
     bl_label = "Randomize Handle Rotation" # label for button
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Randomize handle rotations. \n" \
-    "Mousewheel for seed"
+    bl_description = "Mousewheel for seed. Randomize handle rotation"
 
     _timer = None
     initial_mouse_x = None
@@ -2040,15 +2133,15 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
             base_divisor = 1000.0 if event.alt else 200.0
             delta_x = (event.mouse_x - self.initial_mouse_x) * 0.1
             
+            # Verhindere, dass delta_x negativ wird
+            delta_x = max(0.0, delta_x)
+            
             power_exponent = 2.0
-            abs_delta_x = abs(delta_x)
-            strength = (abs_delta_x / base_divisor) ** power_exponent
-            if delta_x < 0:
-                strength *= -1.0
+            strength = (delta_x / base_divisor) ** power_exponent
             
             self._current_strength = strength
             self._apply_randomized_extrusion(context, self._current_strength)
-            #self.report({'INFO'}, f"Strength: {self._current_strength:.4f}, Seed: {self._current_seed}")
+            #self.report({'INFO'}, f"Strength: {10000 *self._current_strength:.2f}, Seed: {self._current_seed}")
             return {'RUNNING_MODAL'}
             
         elif event.type == 'WHEELUPMOUSE':
@@ -2060,7 +2153,7 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
         elif event.type == 'WHEELDOWNMOUSE':
             self._current_seed -= 1
             self._apply_randomized_extrusion(context, self._current_strength)
-            self.report({'INFO'}, f"Seed: {self._current_seed}")
+            self.report({'INFO'}, f"Strength: {self._current_strength:.6f}, Seed: {self._current_seed}")
             return {'RUNNING_MODAL'}
 
         elif event.type == 'LEFTMOUSE':
@@ -2391,389 +2484,48 @@ class OBJECT_OT_slide_handles(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
+
+
+import bpy
+import math
+
+# Hilfsfunktionen sind hier nicht gezeigt, aber sie sollten vorhanden sein.
+# set_handles_aligned
+# reset_handles
+# set_timeline_range_to_selected
+
 class OBJECT_OT_manipulate_right_handles(bpy.types.Operator):
     bl_idname = "object.manipulate_right_handles"
     bl_label = "Manipulate Right Handles"
     bl_options = {'REGISTER', 'UNDO'}
     bl_description = "Extrude right handles"
     
-    _timer = None
-    initial_mouse_x = None
-    initial_handle_vectors = {}
-    initial_handle_types = {}
-    initial_keyframe_data = {}
-
-    @classmethod
-    def poll(cls, context):
-        return (context.active_object and
-                context.active_object.animation_data and
-                context.active_object.animation_data.action and
-                context.selected_visible_fcurves and
-                len([kf for fc in context.selected_visible_fcurves for kf in fc.keyframe_points if kf.select_control_point]) > 0)
-
-    def modal(self, context, event):
-        if event.type == 'MOUSEMOVE':
-            if event.mouse_x < 5 or event.mouse_x > context.window.width - 5:
-                if event.mouse_x < 5:
-                    new_x = context.window.width - 10
-                else:
-                    new_x = 10
-                
-                self.initial_mouse_x += (new_x - event.mouse_x)
-                context.window.cursor_warp(new_x, event.mouse_y)
-            delta_x = event.mouse_x - self.initial_mouse_x
-            factor = max(delta_x / 200.0, -1.0)
-            
-            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_handle_vectors.items():
-                fcurve = None
-                for fc in context.active_object.animation_data.action.fcurves:
-                    if fc.data_path == data_path and fc.array_index == array_index:
-                        fcurve = fc
-                        break
-
-                if not fcurve:
-                    continue
-                
-                keyframe = fcurve.keyframe_points[keyframe_index]
-                
-                vec_right_initial = initial_vectors['right']
-                length_right_initial = math.sqrt(vec_right_initial[0]**2 + vec_right_initial[1]**2)
-                
-                if length_right_initial > 0:
-                    new_length_right = length_right_initial * (1.0 + factor)
-                    new_x_right = keyframe.co[0] + vec_right_initial[0] / length_right_initial * new_length_right
-                    new_y_right = keyframe.co[1] + vec_right_initial[1] / length_right_initial * new_length_right
-                    keyframe.handle_right[0] = new_x_right
-                    keyframe.handle_right[1] = new_y_right
-            
-            for area in context.screen.areas:
-                if area.type in {'GRAPH_EDITOR', 'VIEW_3D'}:
-                    area.tag_redraw()
-
-        elif event.type == 'LEFTMOUSE':
-            for (data_path, keyframe_index, array_index), types in self.initial_handle_types.items():
-                fcurve = None
-                for fc in context.active_object.animation_data.action.fcurves:
-                    if fc.data_path == data_path and fc.array_index == array_index:
-                        fcurve = fc
-                        break
-                
-                if fcurve:
-                    keyframe = fcurve.keyframe_points[keyframe_index]
-                    keyframe.interpolation = 'BEZIER'
-                    keyframe.handle_left_type = 'ALIGNED'
-                    keyframe.handle_right_type = 'ALIGNED'
-                    
-            context.scene.frame_start = self._initial_frame_start
-            context.scene.frame_end = self._initial_frame_end
-            
-            
-            context.window.cursor_set('DEFAULT')
-            if self._timer:
-                context.window_manager.event_timer_remove(self._timer)
-            return {'FINISHED'}
-        
-        
- 
-        elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
-            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_handle_vectors.items():
-                fcurve = None
-                for fc in context.active_object.animation_data.action.fcurves:
-                    if fc.data_path == data_path and fc.array_index == array_index:
-                        fcurve = fc
-                        break
-
-                if not fcurve:
-                    continue
-                
-                keyframe = fcurve.keyframe_points[keyframe_index]
-                
-                vec_right_initial = initial_vectors['right']
-                keyframe.handle_right[0] = keyframe.co[0] + vec_right_initial[0]
-                keyframe.handle_right[1] = keyframe.co[1] + vec_right_initial[1]
-
-                vec_left_initial = initial_vectors['left']
-                keyframe.handle_left[0] = keyframe.co[0] + vec_left_initial[0]
-                keyframe.handle_left[1] = keyframe.co[1] + vec_left_initial[1]
-                
-                types = self.initial_handle_types[(data_path, keyframe_index, array_index)]
-                keyframe.handle_left_type = types['left']
-                keyframe.handle_right_type = types['right']
-            
-            context.scene.frame_start = self._initial_frame_start
-            context.scene.frame_end = self._initial_frame_end
-            
-            
-            context.window.cursor_set('DEFAULT')
-            if self._timer:
-                context.window_manager.event_timer_remove(self._timer)
-            return {'CANCELLED'}        
-        
-        return {'RUNNING_MODAL'}
-    
-    def invoke(self, context, event):
-        if context.active_object is None or context.active_object.animation_data is None:
-            self.report({'WARNING'}, "No active object or animation data.")
-            return {'CANCELLED'}
-
-        if context.active_object is None or context.active_object.animation_data is None:
-            self.report({'WARNING'}, "Kein aktives Objekt oder keine Animationsdaten.")
-            return {'CANCELLED'}
-
-        if not context.selected_visible_fcurves:
-            self.report({'WARNING'}, "Keine F-Kurven im Graph Editor sichtbar und ausgewählt.")
-            return {'CANCELLED'}
-            
-        # --- NEUE FUNKTION HIER AUFRUFEN ---
-        self._initial_frame_start = context.scene.frame_start
-        self._initial_frame_end = context.scene.frame_end
-        
-        if not context.scene.keep_framerange and context.screen.is_animation_playing:
-            set_timeline_range_to_selected(context)
-
-        self.initial_mouse_x = event.mouse_x
-        self.initial_handle_vectors.clear()
-        self.initial_handle_types.clear()
-        self.initial_keyframe_data.clear()
-        
-        if context.screen.is_animation_playing:
-            # Cursor zum Start der Timeline springen lassen
-            context.scene.frame_current = context.scene.frame_start
-
-        
-        selected_keyframes_found = False
-        for fcurve in context.selected_visible_fcurves:
-            for keyframe_index, keyframe in enumerate(fcurve.keyframe_points):
-                if keyframe.select_control_point:
-                    selected_keyframes_found = True
-                    key = (fcurve.data_path, keyframe_index, fcurve.array_index)
-                    
-                    self.initial_keyframe_data[key] = {
-                        'co_x': keyframe.co[0],
-                    }
-                    
-                    self.initial_handle_types[key] = {
-                        'left': keyframe.handle_left_type,
-                        'right': keyframe.handle_right_type
-                    }
-                    
-                    self.initial_handle_vectors[key] = {
-                        'left': (keyframe.handle_left[0] - keyframe.co[0], keyframe.handle_left[1] - keyframe.co[1]),
-                        'right': (keyframe.handle_right[0] - keyframe.co[0], keyframe.handle_right[1] - keyframe.co[1]),
-                    }
-
-        if not selected_keyframes_found:
-            self.report({'WARNING'}, "Keine Keyframes in den aktiven, sichtbaren Kurven ausgewählt.")
-            return {'CANCELLED'}
-
-        context.window.cursor_set('SCROLL_X')
-        self._timer = context.window_manager.event_timer_add(0.01, window=context.window)
-        context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
-
-
-class OBJECT_OT_manipulate_left_handles(bpy.types.Operator):
-    bl_idname = "object.manipulate_left_handles"
-    bl_label = "Manipulate Left Handles"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Extrude left handles"
+    mode: bpy.props.EnumProperty(
+        items=[
+            ('EXTRUDE', "Extrude", "Extrudes the handles"),
+            ('SLIDE', "Slide", "Slides the handles")
+        ],
+        name="Mode",
+        default='EXTRUDE'
+    )
     
     _timer = None
     initial_mouse_x = None
-    initial_handle_vectors = {}
-    initial_handle_types = {}
-    initial_keyframe_data = {}
-
-    @classmethod
-    def poll(cls, context):
-        return (context.active_object and
-                context.active_object.animation_data and
-                context.active_object.animation_data.action and
-                context.selected_visible_fcurves and
-                len([kf for fc in context.selected_visible_fcurves for kf in fc.keyframe_points if kf.select_control_point]) > 0)
-
-    def modal(self, context, event):
-        if event.type == 'MOUSEMOVE':
-            if event.mouse_x < 5 or event.mouse_x > context.window.width - 5:
-                if event.mouse_x < 5:
-                    new_x = context.window.width - 10
-                else:
-                    new_x = 10
-                
-                self.initial_mouse_x += (new_x - event.mouse_x)
-                context.window.cursor_warp(new_x, event.mouse_y)
-            delta_x = event.mouse_x - self.initial_mouse_x
-            factor = max(delta_x / 200.0, -1.0)
-            
-            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_handle_vectors.items():
-                fcurve = None
-                for fc in context.active_object.animation_data.action.fcurves:
-                    if fc.data_path == data_path and fc.array_index == array_index:
-                        fcurve = fc
-                        break
-
-                if not fcurve:
-                    continue
-                
-                keyframe = fcurve.keyframe_points[keyframe_index]
-                
-                vec_left_initial = initial_vectors['left']
-                length_left_initial = math.sqrt(vec_left_initial[0]**2 + vec_left_initial[1]**2)
-
-                if length_left_initial > 0:
-                    new_length_left = length_left_initial * (1.0 + factor)
-                    new_x_left = keyframe.co[0] + vec_left_initial[0] / length_left_initial * new_length_left
-                    new_y_left = keyframe.co[1] + vec_left_initial[1] / length_left_initial * new_length_left
-                    keyframe.handle_left[0] = new_x_left
-                    keyframe.handle_left[1] = new_y_left
-            
-            for area in context.screen.areas:
-                if area.type in {'GRAPH_EDITOR', 'VIEW_3D'}:
-                    area.tag_redraw()
-
-        elif event.type == 'LEFTMOUSE':
-            for (data_path, keyframe_index, array_index), types in self.initial_handle_types.items():
-                fcurve = None
-                for fc in context.active_object.animation_data.action.fcurves:
-                    if fc.data_path == data_path and fc.array_index == array_index:
-                        fcurve = fc
-                        break
-                
-                if fcurve:
-                    keyframe = fcurve.keyframe_points[keyframe_index]
-                    keyframe.interpolation = 'BEZIER'
-                    keyframe.handle_left_type = 'ALIGNED'
-                    keyframe.handle_right_type = 'ALIGNED'
-            
-            context.scene.frame_start = self._initial_frame_start
-            context.scene.frame_end = self._initial_frame_end
-                    
-            context.window.cursor_set('DEFAULT')
-            if self._timer:
-                context.window_manager.event_timer_remove(self._timer)
-            return {'FINISHED'}
-        
-        
-        
-        elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
-            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_handle_vectors.items():
-                fcurve = None
-                for fc in context.active_object.animation_data.action.fcurves:
-                    if fc.data_path == data_path and fc.array_index == array_index:
-                        fcurve = fc
-                        break
-
-                if not fcurve:
-                    continue
-                
-                keyframe = fcurve.keyframe_points[keyframe_index]
-                
-                vec_right_initial = initial_vectors['right']
-                keyframe.handle_right[0] = keyframe.co[0] + vec_right_initial[0]
-                keyframe.handle_right[1] = keyframe.co[1] + vec_right_initial[1]
-
-                vec_left_initial = initial_vectors['left']
-                keyframe.handle_left[0] = keyframe.co[0] + vec_left_initial[0]
-                keyframe.handle_left[1] = keyframe.co[1] + vec_left_initial[1]
-                
-                types = self.initial_handle_types[(data_path, keyframe_index, array_index)]
-                keyframe.handle_left_type = types['left']
-                keyframe.handle_right_type = types['right']
-            
-            context.scene.frame_start = self._initial_frame_start
-            context.scene.frame_end = self._initial_frame_end
-            
-            context.window.cursor_set('DEFAULT')
-            if self._timer:
-                context.window_manager.event_timer_remove(self._timer)
-            return {'CANCELLED'}        
-        
-        return {'RUNNING_MODAL'}
+    initial_mouse_y = None
     
-    def invoke(self, context, event):
-        if context.active_object is None or context.active_object.animation_data is None:
-            self.report({'WARNING'}, "No active object or animation data.")
-            return {'CANCELLED'}
-
-        if context.active_object is None or context.active_object.animation_data is None:
-            self.report({'WARNING'}, "Kein aktives Objekt oder keine Animationsdaten.")
-            return {'CANCELLED'}
-
-        if not context.selected_visible_fcurves:
-            self.report({'WARNING'}, "Keine F-Kurven im Graph Editor sichtbar und ausgewählt.")
-            return {'CANCELLED'}
-        
-        # --- NEUE FUNKTION HIER AUFRUFEN ---
-        self._initial_frame_start = context.scene.frame_start
-        self._initial_frame_end = context.scene.frame_end
-        
-        if not context.scene.keep_framerange and context.screen.is_animation_playing:
-            set_timeline_range_to_selected(context)
-
-        self.initial_mouse_x = event.mouse_x
-        self.initial_handle_vectors.clear()
-        self.initial_handle_types.clear()
-        self.initial_keyframe_data.clear()
-        
-        if context.screen.is_animation_playing:
-            # Cursor zum Start der Timeline springen lassen
-            context.scene.frame_current = context.scene.frame_start
-
-
-        selected_keyframes_found = False
-        for fcurve in context.selected_visible_fcurves:
-            for keyframe_index, keyframe in enumerate(fcurve.keyframe_points):
-                if keyframe.select_control_point:
-                    selected_keyframes_found = True
-                    key = (fcurve.data_path, keyframe_index, fcurve.array_index)
-                    
-                    self.initial_keyframe_data[key] = {
-                        'co_x': keyframe.co[0],
-                    }
-                    
-                    self.initial_handle_types[key] = {
-                        'left': keyframe.handle_left_type,
-                        'right': keyframe.handle_right_type
-                    }
-                    
-                    self.initial_handle_vectors[key] = {
-                        'left': (keyframe.handle_left[0] - keyframe.co[0], keyframe.handle_left[1] - keyframe.co[1]),
-                        'right': (keyframe.handle_right[0] - keyframe.co[0], keyframe.handle_right[1] - keyframe.co[1]),
-                    }
-
-        if not selected_keyframes_found:
-            self.report({'WARNING'}, "Keine Keyframes in den aktiven, sichtbaren Kurven ausgewählt.")
-            return {'CANCELLED'}
-
-        context.window.cursor_set('SCROLL_X')
-        self._timer = context.window_manager.event_timer_add(0.01, window=context.window)
-        context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
-
-
-
-
-
-
-import bpy
-import math
-
- 
-# --- Operator: Extend/Shrink Between Batches ---
-class OBJECT_OT_manipulate_handles_between_frames(bpy.types.Operator):
-    bl_idname = "object.manipulate_handles_between_frames"
-    bl_label = "Extend/Shrink Batches"
-    bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Slide the inner handles between two keyframes"
-    
-    _timer = None
-    initial_mouse_x = None
     initial_vectors_left_batch = {}
     initial_types_left_batch = {}
+    initial_keyframe_coords_left_batch = {}
+    initial_partner_x_coords_left = {}
+    initial_keyframe_distances_left = {}
+    
     initial_vectors_right_batch = {}
     initial_types_right_batch = {}
-    initial_keyframe_coords_left_batch = {}
     initial_keyframe_coords_right_batch = {}
+    initial_partner_x_coords_right = {}
+    initial_keyframe_distances_right = {}
+    
+    
 
     @classmethod
     def poll(cls, context):
@@ -2788,85 +2540,141 @@ class OBJECT_OT_manipulate_handles_between_frames(bpy.types.Operator):
             if len(selected_keyframes_in_fcurve) >= 2:
                 return True
         return False
-
-
+    
     def modal(self, context, event):
+        extrude_sensitivity = 0.1
+        if event.type in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}:
+        # Wechsel den Modus bei Tastendruck 'X'
+        #if event.type == 'X' and event.value == 'PRESS':
+            if self.mode == 'EXTRUDE':
+                self.mode = 'SLIDE'
+                self.report({'INFO'}, "Switched to Slide Mode")
+                context.window.cursor_set('SCROLL_Y')  # Besser passender Cursor
+            elif self.mode == 'SLIDE':
+                self.mode = 'EXTRUDE'
+                self.report({'INFO'}, "Switched to Extrude Mode")
+                context.window.cursor_set('SCROLL_X') # Besser passender Cursor
+            
+            # Setze die Maus-Position neu
+            self.initial_mouse_x = event.mouse_x
+            self.initial_mouse_y = event.mouse_y
+            return {'RUNNING_MODAL'}
+        
         if event.type == 'MOUSEMOVE':
+            # Cursor-Warping-Logik
             if event.mouse_x < 5 or event.mouse_x > context.window.width - 5:
                 if event.mouse_x < 5:
                     new_x = context.window.width - 10
                 else:
                     new_x = 10
-                
                 self.initial_mouse_x += (new_x - event.mouse_x)
                 context.window.cursor_warp(new_x, event.mouse_y)
-            delta_x = event.mouse_x - self.initial_mouse_x
-            factor = min(max(delta_x / 200, -1.0), 1.0)
-            distance_change = delta_x / 10.0
             
+            delta_x = event.mouse_x - self.initial_mouse_x
+            
+            # Gemeinsame Logik für beide Modi
+            # left batch (handle right)
             for (data_path, keyframe_index, array_index), initial_vectors in self.initial_vectors_left_batch.items():
-                fcurve = None
-                for fc in context.active_object.animation_data.action.fcurves:
-                    if fc.data_path == data_path and fc.array_index == array_index:
-                        fcurve = fc
-                        break
-
-                if not fcurve: continue
-                if keyframe_index >= len(fcurve.keyframe_points): continue 
-                
+                fcurve = next((fc for fc in context.active_object.animation_data.action.fcurves if fc.data_path == data_path and fc.array_index == array_index), None)
+                if not fcurve or keyframe_index >= len(fcurve.keyframe_points): continue
                 keyframe = fcurve.keyframe_points[keyframe_index]
-                
                 vec_right_initial = initial_vectors['right']
                 length_right_initial = math.sqrt(vec_right_initial[0]**2 + vec_right_initial[1]**2)
                 
-                if length_right_initial > 1e-6:
-                    new_length_right = length_right_initial * (1.0 + factor)
-                    new_x_right = keyframe.co[0] + vec_right_initial[0] / length_right_initial * new_length_right
-                    new_y_right = keyframe.co[1] + vec_right_initial[1] / length_right_initial * new_length_right
-                    keyframe.handle_right[0] = new_x_right
-                    keyframe.handle_right[1] = new_y_right
-                else:
-                    keyframe.handle_right[0] = keyframe.co[0]
-                    keyframe.handle_right[1] = keyframe.co[1]
-            
-            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_vectors_right_batch.items():
-                fcurve = None
-                for fc in context.active_object.animation_data.action.fcurves:
-                    if fc.data_path == data_path and fc.array_index == array_index:
-                        fcurve = fc
-                        break
+                # Modus-spezifische Logik für die Anpassung der Länge
+                if self.mode == 'EXTRUDE':
+                    adjustment_amount = (delta_x * extrude_sensitivity)
+                elif self.mode == 'SLIDE':
+                    adjustment_amount = (delta_x * extrude_sensitivity)
 
-                if not fcurve: continue
-                if keyframe_index >= len(fcurve.keyframe_points): continue 
-
-                keyframe = fcurve.keyframe_points[keyframe_index]
+                keyframe_x_distance = self.initial_keyframe_distances_left.get((data_path, keyframe_index, array_index), 1.0)
+                if keyframe_x_distance < 1.0: keyframe_x_distance = 1.0
+                min_length = 0.001 * keyframe_x_distance
                 
+                new_length_right = max(length_right_initial + adjustment_amount, min_length)
+                
+                if length_right_initial > 1e-6:
+                    factor = new_length_right / length_right_initial
+                    new_x_right_unlimited = keyframe.co[0] + vec_right_initial[0] * factor
+                    new_y_right_unlimited = keyframe.co[1] + vec_right_initial[1] * factor
+                else:
+                    new_x_right_unlimited = keyframe.co[0] + new_length_right
+                    new_y_right_unlimited = keyframe.co[1]
+
+                partner_x_coord = self.initial_partner_x_coords_left.get((data_path, keyframe_index, array_index), keyframe.co[0])
+                new_x_right = max(min(new_x_right_unlimited, partner_x_coord), keyframe.co[0])
+                
+                dx_initial = initial_vectors['right'][0]
+                dy_initial = initial_vectors['right'][1]
+
+                if abs(dx_initial) > 1e-6:
+                    new_y_right = keyframe.co[1] + (new_x_right - keyframe.co[0]) * (dy_initial / dx_initial)
+                else:
+                    if dy_initial > 0:
+                        new_y_right = keyframe.co[1] + math.sqrt((new_x_right - keyframe.co[0])**2 + (new_y_right_unlimited - keyframe.co[1])**2)
+                    else:
+                        new_y_right = keyframe.co[1] - math.sqrt((new_x_right - keyframe.co[0])**2 + (new_y_right_unlimited - keyframe.co[1])**2)
+
+                keyframe.handle_right[0] = new_x_right
+                keyframe.handle_right[1] = new_y_right
+
+            # right batch (handle left)
+            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_vectors_right_batch.items():
+                fcurve = next((fc for fc in context.active_object.animation_data.action.fcurves if fc.data_path == data_path and fc.array_index == array_index), None)
+                if not fcurve or keyframe_index >= len(fcurve.keyframe_points): continue
+                keyframe = fcurve.keyframe_points[keyframe_index]
                 vec_left_initial = initial_vectors['left']
                 length_left_initial = math.sqrt(vec_left_initial[0]**2 + vec_left_initial[1]**2)
 
-                if length_left_initial > 1e-6:
-                    new_length_left = max(length_left_initial * (1.0 - factor), 0.0)
-                    new_x_left = keyframe.co[0] + vec_left_initial[0] / length_left_initial * new_length_left
-                    new_y_left = keyframe.co[1] + vec_left_initial[1] / length_left_initial * new_length_left
-                    keyframe.handle_left[0] = new_x_left
-                    keyframe.handle_left[1] = new_y_left
-                else:
-                    keyframe.handle_left[0] = keyframe.co[0]
-                    keyframe.handle_left[1] = keyframe.co[1]
+                # Modus-spezifische Logik für die Anpassung der Länge
+                if self.mode == 'EXTRUDE':
+                    adjustment_amount = (delta_x * extrude_sensitivity)
+                elif self.mode == 'SLIDE':
+                    adjustment_amount = -(delta_x * extrude_sensitivity)  # HIER WIRD DIE RICHTUNG UMGEKEHRT
 
+                keyframe_x_distance = self.initial_keyframe_distances_right.get((data_path, keyframe_index, array_index), 1.0)
+                if keyframe_x_distance < 1.0: keyframe_x_distance = 1.0
+                min_length = 0.001 * keyframe_x_distance
+
+                new_length_left = max(length_left_initial + adjustment_amount, min_length)
+                
+                if length_left_initial > 1e-6:
+                    factor = new_length_left / length_left_initial
+                    new_x_left_unlimited = keyframe.co[0] + vec_left_initial[0] * factor
+                    new_y_left_unlimited = keyframe.co[1] + vec_left_initial[1] * factor
+                else:
+                    new_x_left_unlimited = keyframe.co[0] - new_length_left
+                    new_y_left_unlimited = keyframe.co[1]
+                
+                partner_x_coord = self.initial_partner_x_coords_right.get((data_path, keyframe_index, array_index), keyframe.co[0])
+                new_x_left = min(max(new_x_left_unlimited, partner_x_coord), keyframe.co[0])
+                
+                dx_initial = initial_vectors['left'][0]
+                dy_initial = initial_vectors['left'][1]
+
+                if abs(dx_initial) > 1e-6:
+                    new_y_left = keyframe.co[1] + (new_x_left - keyframe.co[0]) * (dy_initial / dx_initial)
+                else:
+                    if dy_initial > 0:
+                        new_y_left = keyframe.co[1] + math.sqrt((new_x_left - keyframe.co[0])**2 + (new_y_left_unlimited - keyframe.co[1])**2)
+                    else:
+                        new_y_left = keyframe.co[1] - math.sqrt((new_x_left - keyframe.co[0])**2 + (new_y_left_unlimited - keyframe.co[1])**2)
+
+                keyframe.handle_left[0] = new_x_left
+                keyframe.handle_left[1] = new_y_left
+            
+            # Finalize changes for both modes
             for area in context.screen.areas:
                 if area.type in {'GRAPH_EDITOR', 'VIEW_3D'}:
                     area.tag_redraw()
             
             return {'RUNNING_MODAL'}
-
+            
         elif event.type == 'LEFTMOUSE':
             set_handles_aligned(context, self.initial_types_left_batch)
             set_handles_aligned(context, self.initial_types_right_batch)
-            
             context.scene.frame_start = self._initial_frame_start
             context.scene.frame_end = self._initial_frame_end
-            
             context.window.cursor_set('DEFAULT')
             if self._timer:
                 context.window_manager.event_timer_remove(self._timer)
@@ -2875,10 +2683,8 @@ class OBJECT_OT_manipulate_handles_between_frames(bpy.types.Operator):
         elif event.type in {'RIGHTMOUSE', 'ESC'}:
             reset_handles(context, self.initial_vectors_left_batch, self.initial_types_left_batch, self.initial_keyframe_coords_left_batch)
             reset_handles(context, self.initial_vectors_right_batch, self.initial_types_right_batch, self.initial_keyframe_coords_right_batch)
-            
             context.scene.frame_start = self._initial_frame_start
             context.scene.frame_end = self._initial_frame_end
-            
             context.window.cursor_set('DEFAULT')
             if self._timer:
                 context.window_manager.event_timer_remove(self._timer)
@@ -2887,6 +2693,506 @@ class OBJECT_OT_manipulate_handles_between_frames(bpy.types.Operator):
         return {'RUNNING_MODAL'}
     
     def invoke(self, context, event):
+        self.mode = 'EXTRUDE'
+        if not self.poll(context):
+            self.report({'WARNING'}, "No active object or matching keyframes found.")
+            return {'CANCELLED'}
+        
+        # Den Modus nicht explizit auf "EXTRUDE" setzen.
+        # Er wird automatisch auf den Standardwert des EnumProperty gesetzt,
+        # wenn der Operator zum ersten Mal ausgeführt wird,
+        # und behält seinen Wert danach bei, bis er geändert wird.
+
+        self.initial_mouse_x = event.mouse_x
+        self.initial_mouse_y = event.mouse_y
+        self._initial_frame_start = context.scene.frame_start
+        self._initial_frame_end = context.scene.frame_end
+        
+        # Clear all dictionaries
+        self.initial_vectors_left_batch.clear()
+        self.initial_types_left_batch.clear()
+        self.initial_keyframe_coords_left_batch.clear()
+        self.initial_partner_x_coords_left.clear()
+        self.initial_keyframe_distances_left.clear()
+        self.initial_vectors_right_batch.clear()
+        self.initial_types_right_batch.clear()
+        self.initial_keyframe_coords_right_batch.clear()
+        self.initial_partner_x_coords_right.clear()
+        self.initial_keyframe_distances_right.clear()
+        
+        has_valid_pair = False
+        for fcurve in context.selected_visible_fcurves:
+            selected_keyframes_with_indices = [(index, kf) for index, kf in enumerate(fcurve.keyframe_points) if kf.select_control_point]
+            if len(selected_keyframes_with_indices) >= 2:
+                has_valid_pair = True
+                selected_keyframes_with_indices.sort(key=lambda item: item[1].co[0])
+                first_keyframe_index, first_keyframe = selected_keyframes_with_indices[0]
+                last_keyframe_index, last_keyframe = selected_keyframes_with_indices[-1]
+
+                keyframe_x_distance = last_keyframe.co[0] - first_keyframe.co[0]
+                self.initial_keyframe_distances_left[(fcurve.data_path, first_keyframe_index, fcurve.array_index)] = keyframe_x_distance
+                self.initial_keyframe_distances_right[(fcurve.data_path, last_keyframe_index, fcurve.array_index)] = keyframe_x_distance
+
+                key_first = (fcurve.data_path, first_keyframe_index, fcurve.array_index)
+                key_last = (fcurve.data_path, last_keyframe_index, fcurve.array_index)
+                
+                self.initial_types_left_batch[key_first] = {'left': first_keyframe.handle_left_type, 'right': first_keyframe.handle_right_type}
+                self.initial_vectors_left_batch[key_first] = {'left': (first_keyframe.handle_left[0] - first_keyframe.co[0], first_keyframe.handle_left[1] - first_keyframe.co[1]),
+                                                             'right': (first_keyframe.handle_right[0] - first_keyframe.co[0], first_keyframe.handle_right[1] - first_keyframe.co[1])}
+                self.initial_keyframe_coords_left_batch[key_first] = {'co_x': first_keyframe.co[0], 'co_y': first_keyframe.co[1]}
+                self.initial_partner_x_coords_left[key_first] = last_keyframe.co[0]
+
+                self.initial_types_right_batch[key_last] = {'left': last_keyframe.handle_left_type, 'right': last_keyframe.handle_right_type}
+                self.initial_vectors_right_batch[key_last] = {'left': (last_keyframe.handle_left[0] - last_keyframe.co[0], last_keyframe.handle_left[1] - last_keyframe.co[1]),
+                                                             'right': (last_keyframe.handle_right[0] - last_keyframe.co[0], last_keyframe.handle_right[1] - last_keyframe.co[1])}
+                self.initial_keyframe_coords_right_batch[key_last] = {'co_x': last_keyframe.co[0], 'co_y': last_keyframe.co[1]}
+                self.initial_partner_x_coords_right[key_last] = first_keyframe.co[0]
+
+        if not has_valid_pair:
+            self.report({'WARNING'}, "Es wurden keine F-Kurven gefunden, die mindestens zwei ausgewählte Keyframes enthalten.")
+            return {'CANCELLED'}
+
+        if not context.scene.keep_framerange and context.screen.is_animation_playing:
+            set_timeline_range_to_selected(context)
+
+        context.window.cursor_set('SCROLL_X')
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+from mathutils import Vector
+
+class OBJECT_OT_scale_handles(bpy.types.Operator):
+    bl_idname = "object.scale_handles"
+    bl_label = "scale handles"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Mousewheel for X- or Initial-Axis"
+    
+    _timer = None
+    initial_mouse_x = None
+    initial_mouse_y = None
+    _mode = 'X_AXIS'
+    initial_handle_vectors = {}
+    initial_handle_types = {}
+    initial_keyframe_data = {}
+    _initial_frame_start = None
+    _initial_frame_end = None
+
+    @classmethod
+    def poll(cls, context):
+        return (context.active_object and
+                context.active_object.animation_data and
+                context.active_object.animation_data.action and
+                context.selected_visible_fcurves and
+                len([kf for fc in context.selected_visible_fcurves for kf in fc.keyframe_points if kf.select_control_point]) > 0)
+    
+    def modal(self, context, event):
+        if event.type == 'MOUSEMOVE':
+            # Maus-Warping für unendliche Bewegung
+            if event.mouse_x < 5 or event.mouse_x > context.window.width - 5:
+                if event.mouse_x < 5:
+                    new_x = context.window.width - 10
+                else:
+                    new_x = 10
+                self.initial_mouse_x += (new_x - event.mouse_x)
+                context.window.cursor_warp(new_x, event.mouse_y)
+
+            if event.mouse_y < 5 or event.mouse_y > context.window.height - 5:
+                if event.mouse_y < 5:
+                    new_y = context.window.height - 10
+                else:
+                    new_y = 10
+                self.initial_mouse_y += (new_y - event.mouse_y)
+                context.window.cursor_warp(event.mouse_x, new_y)
+
+            delta_x = event.mouse_x - self.initial_mouse_x
+            delta_y = event.mouse_y - self.initial_mouse_y
+            
+            if self._mode == 'X_AXIS':
+                factor = delta_x / 200.0
+            elif self._mode == 'Y_AXIS':
+                factor = delta_x / 200.0
+            else: # 'XY_AXIS'
+                factor = delta_x / 200.0 if abs(delta_x) > abs(delta_y) else delta_y / 200.0
+
+            for key, initial_vectors in self.initial_handle_vectors.items():
+                data_path, keyframe_index, array_index = key
+
+                fcurve = None
+                for fc in context.active_object.animation_data.action.fcurves:
+                    if fc.data_path == data_path and fc.array_index == array_index:
+                        fcurve = fc
+                        break
+
+                if not fcurve:
+                    continue
+                
+                keyframe = fcurve.keyframe_points[keyframe_index]
+                vec_left_initial = Vector(initial_vectors['left'])
+                vec_right_initial = Vector(initial_vectors['right'])
+
+                if self._mode == 'X_AXIS':
+                    # Skalierung nur in X-Richtung
+                    new_x_left = keyframe.co[0] + vec_left_initial.x * (1.0 + factor)
+                    new_y_left = keyframe.co[1] + vec_left_initial.y
+                    keyframe.handle_left[0] = new_x_left
+                    keyframe.handle_left[1] = new_y_left
+                    
+                    new_x_right = keyframe.co[0] + vec_right_initial.x * (1.0 + factor)
+                    new_y_right = keyframe.co[1] + vec_right_initial.y
+                    keyframe.handle_right[0] = new_x_right
+                    keyframe.handle_right[1] = new_y_right
+
+                elif self._mode == 'Y_AXIS':
+                    # Skalierung nur in Y-Richtung
+                    new_x_left = keyframe.co[0] + vec_left_initial.x
+                    new_y_left = keyframe.co[1] + vec_left_initial.y * (1.0 + factor)
+                    keyframe.handle_left[0] = new_x_left
+                    keyframe.handle_left[1] = new_y_left
+                    
+                    new_x_right = keyframe.co[0] + vec_right_initial.x
+                    new_y_right = keyframe.co[1] + vec_right_initial.y * (1.0 + factor)
+                    keyframe.handle_right[0] = new_x_right
+                    keyframe.handle_right[1] = new_y_right
+                
+                elif self._mode == 'XY_AXIS':
+                    # Proportionale Skalierung in X und Y
+                    new_vec_left = vec_left_initial * (1.0 + factor)
+                    new_vec_right = vec_right_initial * (1.0 + factor)
+                    
+                    keyframe.handle_left = keyframe.co + new_vec_left
+                    keyframe.handle_right = keyframe.co + new_vec_right
+                    
+            for area in context.screen.areas:
+                if area.type in {'GRAPH_EDITOR', 'VIEW_3D'}:
+                    area.tag_redraw()
+
+        elif event.type in {'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}:
+            self.initial_mouse_x = event.mouse_x
+            self.initial_mouse_y = event.mouse_y
+            
+            if self._mode == 'X_AXIS':    
+                self._mode = 'XY_AXIS'
+                context.window.cursor_set('SCROLL_X')
+                self.report({'INFO'}, f"Initial-Axis")
+            elif self._mode == 'Y_AXIS':
+                self._mode = 'X_AXIS'
+                context.window.cursor_set('SCROLL_X')
+                self.report({'INFO'}, f"X-Axis")
+            else:
+                self._mode = 'Y_AXIS'
+                context.window.cursor_set('SCROLL_X')
+                self.report({'INFO'}, f"Y-Axis")
+                
+            
+            
+        elif event.type == 'LEFTMOUSE':
+            for key, types in self.initial_handle_types.items():
+                data_path, keyframe_index, array_index = key
+                fcurve = None
+                for fc in context.active_object.animation_data.action.fcurves:
+                    if fc.data_path == data_path and fc.array_index == array_index:
+                        fcurve = fc
+                        break
+                
+                if fcurve:
+                    keyframe = fcurve.keyframe_points[keyframe_index]
+                    keyframe.interpolation = 'BEZIER'
+                    keyframe.handle_left_type = 'ALIGNED'
+                    keyframe.handle_right_type = 'ALIGNED'
+            
+            context.scene.frame_start = self._initial_frame_start
+            context.scene.frame_end = self._initial_frame_end
+                    
+            context.window.cursor_set('DEFAULT')
+            if self._timer:
+                context.window_manager.event_timer_remove(self._timer)
+            return {'FINISHED'}
+        
+        elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
+            for key, initial_vectors in self.initial_handle_vectors.items():
+                data_path, keyframe_index, array_index = key
+                fcurve = None
+                for fc in context.active_object.animation_data.action.fcurves:
+                    if fc.data_path == data_path and fc.array_index == array_index:
+                        fcurve = fc
+                        break
+
+                if not fcurve:
+                    continue
+                
+                keyframe = fcurve.keyframe_points[keyframe_index]
+                
+                vec_right_initial = initial_vectors['right']
+                keyframe.handle_right[0] = keyframe.co[0] + vec_right_initial[0]
+                keyframe.handle_right[1] = keyframe.co[1] + vec_right_initial[1]
+
+                vec_left_initial = initial_vectors['left']
+                keyframe.handle_left[0] = keyframe.co[0] + vec_left_initial[0]
+                keyframe.handle_left[1] = keyframe.co[1] + vec_left_initial[1]
+                
+                types = self.initial_handle_types[key]
+                keyframe.handle_left_type = types['left']
+                keyframe.handle_right_type = types['right']
+            
+            context.scene.frame_start = self._initial_frame_start
+            context.scene.frame_end = self._initial_frame_end
+            
+            context.window.cursor_set('DEFAULT')
+            if self._timer:
+                context.window_manager.event_timer_remove(self._timer)
+            return {'CANCELLED'}          
+        
+        return {'RUNNING_MODAL'}
+
+    def invoke(self, context, event):
+        self.report({'INFO'}, f"Y-Axis")
+        if context.active_object is None or context.active_object.animation_data is None:
+            self.report({'WARNING'}, "Kein aktives Objekt oder keine Animationsdaten.")
+            return {'CANCELLED'}
+
+        if not context.selected_visible_fcurves:
+            self.report({'WARNING'}, "Keine F-Kurven im Graph Editor sichtbar und ausgewählt.")
+            return {'CANCELLED'}
+        
+        self._initial_frame_start = context.scene.frame_start
+        self._initial_frame_end = context.scene.frame_end
+        
+        if not context.scene.keep_framerange and context.screen.is_animation_playing:
+            set_timeline_range_to_selected(context)
+
+        self.initial_mouse_x = event.mouse_x
+        self.initial_mouse_y = event.mouse_y
+        self._mode = 'Y_AXIS'
+        self.initial_handle_vectors.clear()
+        self.initial_handle_types.clear()
+        self.initial_keyframe_data.clear()
+        
+        if context.screen.is_animation_playing:
+            context.scene.frame_current = context.scene.frame_start
+
+        selected_keyframes_found = False
+        for fcurve in context.selected_visible_fcurves:
+            for keyframe_index, keyframe in enumerate(fcurve.keyframe_points):
+                if keyframe.select_control_point:
+                    selected_keyframes_found = True
+                    key = (fcurve.data_path, keyframe_index, fcurve.array_index)
+                    
+                    self.initial_keyframe_data[key] = {
+                        'co_x': keyframe.co[0],
+                    }
+                    
+                    self.initial_handle_types[key] = {
+                        'left': keyframe.handle_left_type,
+                        'right': keyframe.handle_right_type
+                    }
+                    
+                    self.initial_handle_vectors[key] = {
+                        'left': (keyframe.handle_left[0] - keyframe.co[0], keyframe.handle_left[1] - keyframe.co[1]),
+                        'right': (keyframe.handle_right[0] - keyframe.co[0], keyframe.handle_right[1] - keyframe.co[1]),
+                    }
+
+        if not selected_keyframes_found:
+            self.report({'WARNING'}, "Keine Keyframes in den aktiven, sichtbaren Kurven ausgewählt.")
+            return {'CANCELLED'}
+
+        context.window.cursor_set('SCROLL_X')
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+
+
+
+
+
+
+class OBJECT_OT_extrude_slide_handles_between_frames(bpy.types.Operator):
+    bl_idname = "object.extrude_slide_handles_between_frames"
+    bl_label = "slide batches"
+    bl_options = {'REGISTER', 'UNDO'}
+    bl_description = "Select two consecutive keyframes. Mousewheel for Extrude or Slide on X-Axis. Hold ALT for Y-Axis"
+    
+    _timer = None
+    initial_mouse_x = None
+    initial_mouse_y = None
+    initial_vectors_left_batch = {}
+    initial_types_left_batch = {}
+    initial_vectors_right_batch = {}
+    initial_types_right_batch = {}
+    initial_keyframe_coords_left_batch = {}
+    initial_keyframe_coords_right_batch = {}
+    initial_keyframe_distances = {}
+    
+    # Variable für den Umschalt-Modus
+    invert_effect = False
+
+    @classmethod
+    def poll(cls, context):
+        if not (context.active_object and
+                context.active_object.animation_data and
+                context.active_object.animation_data.action and
+                context.selected_visible_fcurves):
+            return False
+        
+        for fcurve in context.selected_visible_fcurves:
+            selected_keyframes_in_fcurve = [kf for kf in fcurve.keyframe_points if kf.select_control_point]
+            if len(selected_keyframes_in_fcurve) >= 2:
+                return True
+        return False
+    
+    def modal(self, context, event):
+        if event.type == 'MOUSEMOVE':
+            # Cursor-Warping-Logik
+            if event.mouse_x < 5 or event.mouse_x > context.window.width - 5:
+                if event.mouse_x < 5:
+                    new_x = context.window.width - 10
+                else:
+                    new_x = 10
+                self.initial_mouse_x += (new_x - event.mouse_x)
+                context.window.cursor_warp(new_x, event.mouse_y)
+
+            delta_x = event.mouse_x - self.initial_mouse_x
+            delta_y = event.mouse_y - self.initial_mouse_y
+            
+            angle_sensitivity = 0.005
+            translate_sensitivity = 0.05
+
+            if event.alt:
+                x_movement_factor = 0.0
+                y_movement_factor = 1.0
+            else:
+                x_movement_factor = 1.0
+                y_movement_factor = 0.0
+
+            # Verarbeitung für den linken Keyframe (Handle Right)
+            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_vectors_left_batch.items():
+                fcurve = next((fc for fc in context.active_object.animation_data.action.fcurves if fc.data_path == data_path and fc.array_index == array_index), None)
+                if not fcurve or keyframe_index >= len(fcurve.keyframe_points):
+                    continue
+                
+                keyframe = fcurve.keyframe_points[keyframe_index]
+                
+                # Verschieben des inneren (rechten) Handles
+                vec_right_initial = initial_vectors['right']
+                keyframe_x_distance = self.initial_keyframe_distances[(data_path, keyframe_index, array_index)]
+                initial_handle_x = keyframe.co[0] + vec_right_initial[0]
+                new_x_right = initial_handle_x + (delta_x * translate_sensitivity * x_movement_factor)
+                min_x = keyframe.co[0]
+                max_x = keyframe.co[0] + keyframe_x_distance
+                new_x_right_clamped = max(min_x, min(max_x, new_x_right))
+
+                initial_angle_rad_right = math.atan2(vec_right_initial[1], vec_right_initial[0])
+                adjustment_sign_right = 1.0 if vec_right_initial[1] >= 0 else -1.0
+                angle_adjustment_right = math.radians(delta_y * angle_sensitivity * y_movement_factor * adjustment_sign_right)
+                new_angle_rad_right = initial_angle_rad_right + angle_adjustment_right
+                
+                length_right_initial = math.sqrt(vec_right_initial[0]**2 + vec_right_initial[1]**2)
+                
+                keyframe.handle_right[0] = new_x_right_clamped
+                keyframe.handle_right[1] = keyframe.co[1] + length_right_initial * math.sin(new_angle_rad_right)
+
+                # NEUE LOGIK: Setze den äußeren (linken) Handle relativ zum inneren
+                vec_left_initial = initial_vectors['left']
+                length_left_initial = math.sqrt(vec_left_initial[0]**2 + vec_left_initial[1]**2)
+                
+                # Verwende den neuen Winkel des inneren Handles + 180 Grad
+                new_angle_rad_left = math.atan2(keyframe.handle_right[1] - keyframe.co[1], keyframe.handle_right[0] - keyframe.co[0]) + math.pi
+                
+                keyframe.handle_left[0] = keyframe.co[0] + length_left_initial * math.cos(new_angle_rad_left)
+                keyframe.handle_left[1] = keyframe.co[1] + length_left_initial * math.sin(new_angle_rad_left)
+
+            # Verarbeitung für den rechten Keyframe (Handle Left)
+            for (data_path, keyframe_index, array_index), initial_vectors in self.initial_vectors_right_batch.items():
+                fcurve = next((fc for fc in context.active_object.animation_data.action.fcurves if fc.data_path == data_path and fc.array_index == array_index), None)
+                if not fcurve or keyframe_index >= len(fcurve.keyframe_points):
+                    continue
+                
+                keyframe = fcurve.keyframe_points[keyframe_index]
+                left_keyframe = fcurve.keyframe_points[keyframe_index - 1]
+                
+                # Verschieben des inneren (linken) Handles
+                vec_left_initial = initial_vectors['left']
+                initial_handle_x = keyframe.co[0] + vec_left_initial[0]
+                
+                if self.invert_effect:
+                    new_x_left = initial_handle_x + (delta_x * translate_sensitivity * x_movement_factor)
+         
+                else:
+                    new_x_left = initial_handle_x - (delta_x * translate_sensitivity * x_movement_factor)
+                
+                min_x = left_keyframe.co[0]
+                max_x = keyframe.co[0]
+                new_x_left_clamped = max(min_x, min(max_x, new_x_left))
+                
+                initial_angle_rad_left = math.atan2(vec_left_initial[1], vec_left_initial[0])
+                adjustment_sign_left = -1.0 if vec_left_initial[1] >= 0 else 1.0
+                
+                if self.invert_effect:
+                    angle_adjustment_left = math.radians(delta_y * angle_sensitivity * y_movement_factor * adjustment_sign_left)
+                else:
+                    angle_adjustment_left = math.radians(-delta_y * angle_sensitivity * y_movement_factor * adjustment_sign_left)
+                        
+                new_angle_rad_left = initial_angle_rad_left + angle_adjustment_left
+                length_left_initial = math.sqrt(vec_left_initial[0]**2 + vec_left_initial[1]**2)
+
+                keyframe.handle_left[0] = new_x_left_clamped
+                keyframe.handle_left[1] = keyframe.co[1] + length_left_initial * math.sin(new_angle_rad_left)
+                
+                # NEUE LOGIK: Setze den äußeren (rechten) Handle relativ zum inneren
+                vec_right_initial = initial_vectors['right']
+                length_right_initial = math.sqrt(vec_right_initial[0]**2 + vec_right_initial[1]**2)
+                
+                # Verwende den neuen Winkel des inneren Handles + 180 Grad
+                new_angle_rad_right = math.atan2(keyframe.handle_left[1] - keyframe.co[1], keyframe.handle_left[0] - keyframe.co[0]) + math.pi
+                
+                keyframe.handle_right[0] = keyframe.co[0] + length_right_initial * math.cos(new_angle_rad_right)
+                keyframe.handle_right[1] = keyframe.co[1] + length_right_initial * math.sin(new_angle_rad_right)
+
+
+            for area in context.screen.areas:
+                if area.type in {'GRAPH_EDITOR', 'VIEW_3D'}:
+                    area.tag_redraw()
+            
+            return {'RUNNING_MODAL'}
+        
+        elif event.type == 'WHEELUPMOUSE' or event.type == 'WHEELDOWNMOUSE':
+            self.invert_effect = not self.invert_effect
+            if self.invert_effect == 0:
+                self.report({'INFO'}, "EXTRUDE")
+            else:
+                self.report({'INFO'}, "SLIDE")
+                
+            for area in context.screen.areas:
+                if area.type in {'GRAPH_EDITOR', 'VIEW_3D'}:
+                    area.tag_redraw()
+            return {'RUNNING_MODAL'}
+        
+        elif event.type == 'LEFTMOUSE':
+            set_handles_aligned(context, self.initial_types_left_batch)
+            set_handles_aligned(context, self.initial_types_right_batch)
+            context.scene.frame_start = self._initial_frame_start
+            context.scene.frame_end = self._initial_frame_end
+            context.window.cursor_set('DEFAULT')
+            if self._timer:
+                context.window_manager.event_timer_remove(self._timer)
+            self.invert_effect = False
+            return {'FINISHED'}
+        
+        elif event.type in {'RIGHTMOUSE', 'ESC'}:
+            reset_handles(context, self.initial_vectors_left_batch, self.initial_types_left_batch, self.initial_keyframe_coords_left_batch)
+            reset_handles(context, self.initial_vectors_right_batch, self.initial_types_right_batch, self.initial_keyframe_coords_right_batch)
+            context.scene.frame_start = self._initial_frame_start
+            context.scene.frame_end = self._initial_frame_end
+            context.window.cursor_set('DEFAULT')
+            if self._timer:
+                context.window_manager.event_timer_remove(self._timer)
+            self.invert_effect = False
+            return {'CANCELLED'}
+
+        return {'RUNNING_MODAL'}
+
+    def invoke(self, context, event):
+        self.report({'INFO'}, "EXTRUDE")
+         
         if context.active_object is None or context.active_object.animation_data is None:
             self.report({'WARNING'}, "Kein aktives Objekt oder keine Animationsdaten gefunden.")
             return {'CANCELLED'}
@@ -2901,11 +3207,11 @@ class OBJECT_OT_manipulate_handles_between_frames(bpy.types.Operator):
         self.initial_types_right_batch.clear()
         self.initial_keyframe_coords_left_batch.clear()
         self.initial_keyframe_coords_right_batch.clear()
+        self.initial_keyframe_distances.clear()
         
         has_valid_pair = False
         
         for fcurve in context.selected_visible_fcurves:
-            # Sammle Keyframes mit ihrem Index
             selected_keyframes_with_indices = [
                 (index, kf) for index, kf in enumerate(fcurve.keyframe_points) if kf.select_control_point
             ]
@@ -2913,14 +3219,14 @@ class OBJECT_OT_manipulate_handles_between_frames(bpy.types.Operator):
             if len(selected_keyframes_with_indices) >= 2:
                 has_valid_pair = True
                 
-                # Sortiere nach der X-Koordinate (Frame)
                 selected_keyframes_with_indices.sort(key=lambda item: item[1].co[0])
                 
-                # Hol den Index und das Keyframe-Objekt des ersten und letzten Elements
                 first_keyframe_index, first_keyframe = selected_keyframes_with_indices[0]
                 last_keyframe_index, last_keyframe = selected_keyframes_with_indices[-1]
 
-                # Erstelle die Keys mit dem korrekten Index
+                keyframe_x_distance = last_keyframe.co[0] - first_keyframe.co[0]
+                self.initial_keyframe_distances[(fcurve.data_path, first_keyframe_index, fcurve.array_index)] = keyframe_x_distance
+
                 key_first = (fcurve.data_path, first_keyframe_index, fcurve.array_index)
                 key_last = (fcurve.data_path, last_keyframe_index, fcurve.array_index)
                 
@@ -2955,6 +3261,7 @@ class OBJECT_OT_manipulate_handles_between_frames(bpy.types.Operator):
             set_timeline_range_to_selected(context)
 
         self.initial_mouse_x = event.mouse_x
+        self.initial_mouse_y = event.mouse_y # Neu hinzugefügt
         
         if context.screen.is_animation_playing:
             context.scene.frame_current = context.scene.frame_start
@@ -2964,20 +3271,28 @@ class OBJECT_OT_manipulate_handles_between_frames(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
 
-class OBJECT_OT_shrink_batches(bpy.types.Operator):
-    bl_idname = "object.shrink_batches"
-    bl_label = "Uniform Batch Scale"
+class OBJECT_OT_extrude_handles_between_frames(bpy.types.Operator):
+    bl_idname = "object.extrude_handles_between_frames"
+    bl_label = "extrude_handles_between_frames"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Extrude the inner handles between two keyframes"
+    bl_description = "Mousewheel for Extrude or Slide on Initial-Axis. Select two consecutive keyframes"
     
     _timer = None
     initial_mouse_x = None
+    
     initial_vectors_left_batch = {}
     initial_types_left_batch = {}
+    initial_keyframe_coords_left_batch = {}
+    initial_partner_x_coords_left = {}
+    
     initial_vectors_right_batch = {}
     initial_types_right_batch = {}
-    initial_keyframe_coords_left_batch = {}
     initial_keyframe_coords_right_batch = {}
+    initial_partner_x_coords_right = {}
+    
+    initial_keyframe_distances = {}
+
+    invert_effect = True
 
     @classmethod
     def poll(cls, context):
@@ -2987,7 +3302,6 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
                 context.selected_visible_fcurves):
             return False
         
-        # Check if there's at least one fcurve with two or more selected keyframes
         for fcurve in context.selected_visible_fcurves:
             selected_keyframes_in_fcurve = [kf for kf in fcurve.keyframe_points if kf.select_control_point]
             if len(selected_keyframes_in_fcurve) >= 2:
@@ -3004,10 +3318,11 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
                 
                 self.initial_mouse_x += (new_x - event.mouse_x)
                 context.window.cursor_warp(new_x, event.mouse_y)
+            
             delta_x = event.mouse_x - self.initial_mouse_x
             
-            factor = delta_x / 200.0
-
+            # Verarbeitung für den linken Keyframe (Handle Right)
+            # Diese Logik bleibt immer gleich, unabhängig vom invert_effect
             for (data_path, keyframe_index, array_index), initial_vectors in self.initial_vectors_left_batch.items():
                 fcurve = None
                 for fc in context.active_object.animation_data.action.fcurves:
@@ -3016,23 +3331,51 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
                         break
 
                 if not fcurve: continue
-                if keyframe_index >= len(fcurve.keyframe_points): continue 
+                if keyframe_index >= len(fcurve.keyframe_points): continue
                 
                 keyframe = fcurve.keyframe_points[keyframe_index]
-                
                 vec_right_initial = initial_vectors['right']
                 length_right_initial = math.sqrt(vec_right_initial[0]**2 + vec_right_initial[1]**2)
-                
+
+                keyframe_x_distance = self.initial_keyframe_distances.get((data_path, keyframe_index, array_index), 1.0)
+                if keyframe_x_distance < 1.0: keyframe_x_distance = 1.0
+
+                min_length = 0.001 * keyframe_x_distance
+
+                # Standard-Extrusion: Länge erhöht sich mit positivem delta_x
+                adjustment_amount = (delta_x * keyframe_x_distance * 0.005)
+
+                new_length_right = length_right_initial + adjustment_amount
+
+                new_length_right = max(new_length_right, min_length)
+
                 if length_right_initial > 1e-6:
-                    new_length_right = max(length_right_initial * (1.0 + factor), 0.0)
-                    new_x_right = keyframe.co[0] + vec_right_initial[0] / length_right_initial * new_length_right
-                    new_y_right = keyframe.co[1] + vec_right_initial[1] / length_right_initial * new_length_right
-                    keyframe.handle_right[0] = new_x_right
-                    keyframe.handle_right[1] = new_y_right
+                    new_x_right_unlimited = keyframe.co[0] + vec_right_initial[0] / length_right_initial * new_length_right
+                    new_y_right_unlimited = keyframe.co[1] + vec_right_initial[1] / length_right_initial * new_length_right
                 else:
-                    keyframe.handle_right[0] = keyframe.co[0]
-                    keyframe.handle_right[1] = keyframe.co[1]
+                    new_length_right = max(new_length_right, min_length)
+                    if new_length_right > 0:
+                        vec_right = (1.0, 0.0)
+                        new_x_right_unlimited = keyframe.co[0] + vec_right[0] * new_length_right
+                        new_y_right_unlimited = keyframe.co[1] + vec_right[1] * new_length_right
+                    else:
+                        new_x_right_unlimited = keyframe.co[0]
+                        new_y_right_unlimited = keyframe.co[1]
+                
+                partner_x_coord = self.initial_partner_x_coords_left.get((data_path, keyframe_index, array_index), keyframe.co[0])
+                
+                new_x_right = max(min(new_x_right_unlimited, partner_x_coord), keyframe.co[0])
+                
+                dx = new_x_right - keyframe.co[0]
+                dy = (vec_right_initial[1] / vec_right_initial[0]) * dx if abs(vec_right_initial[0]) > 1e-6 else 0
+                new_y_right = keyframe.co[1] + dy
+                
+                keyframe.handle_right[0] = new_x_right
+                keyframe.handle_right[1] = new_y_right
+
             
+            # Verarbeitung für den rechten Keyframe (Handle Left)
+            # Hier wird die Logik basierend auf invert_effect umgeschaltet
             for (data_path, keyframe_index, array_index), initial_vectors in self.initial_vectors_right_batch.items():
                 fcurve = None
                 for fc in context.active_object.animation_data.action.fcurves:
@@ -3041,29 +3384,72 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
                         break
 
                 if not fcurve: continue
-                if keyframe_index >= len(fcurve.keyframe_points): continue 
+                if keyframe_index >= len(fcurve.keyframe_points): continue
 
                 keyframe = fcurve.keyframe_points[keyframe_index]
-                
                 vec_left_initial = initial_vectors['left']
                 length_left_initial = math.sqrt(vec_left_initial[0]**2 + vec_left_initial[1]**2)
+                
+                keyframe_x_distance = self.initial_keyframe_distances.get((data_path, keyframe_index, array_index), 1.0)
+                if keyframe_x_distance < 1.0: keyframe_x_distance = 1.0
+                
+                min_length = 0.001 * keyframe_x_distance
+
+                # KORREKTUR: Jetzt nur hier die Anpassung der Richtung
+                if not self.invert_effect:
+                    # Standard: Länge verringert sich mit positivem delta_x
+                    adjustment_amount = (-delta_x * keyframe_x_distance * 0.005)
+                else:
+                    # Invertiert: Länge verringert sich mit negativem delta_x
+                    adjustment_amount = (delta_x * keyframe_x_distance * 0.005)
+                
+                new_length_left = length_left_initial + adjustment_amount
+
+                new_length_left = max(new_length_left, min_length)
 
                 if length_left_initial > 1e-6:
-                    new_length_left = max(length_left_initial * (1.0 + factor), 0.0)
-                    new_x_left = keyframe.co[0] + vec_left_initial[0] / length_left_initial * new_length_left
-                    new_y_left = keyframe.co[1] + vec_left_initial[1] / length_left_initial * new_length_left
-                    keyframe.handle_left[0] = new_x_left
-                    keyframe.handle_left[1] = new_y_left
+                    new_x_left_unlimited = keyframe.co[0] + vec_left_initial[0] / length_left_initial * new_length_left
+                    new_y_left_unlimited = keyframe.co[1] + vec_left_initial[1] / length_left_initial * new_length_left
                 else:
-                    keyframe.handle_left[0] = keyframe.co[0]
-                    keyframe.handle_left[1] = keyframe.co[1]
+                    new_length_left = max(new_length_left, min_length)
+                    if new_length_left > 0:
+                        vec_left = (-1.0, 0.0)
+                        new_x_left_unlimited = keyframe.co[0] + vec_left[0] * new_length_left
+                        new_y_left_unlimited = keyframe.co[1] + vec_left[1] * new_length_left
+                    else:
+                        new_x_left_unlimited = keyframe.co[0]
+                        new_y_left_unlimited = keyframe.co[1]
+
+                partner_x_coord = self.initial_partner_x_coords_right.get((data_path, keyframe_index, array_index), keyframe.co[0])
+                
+                new_x_left = min(max(new_x_left_unlimited, partner_x_coord), keyframe.co[0])
+                
+                dx = new_x_left - keyframe.co[0]
+                dy = (vec_left_initial[1] / vec_left_initial[0]) * dx if abs(vec_left_initial[0]) > 1e-6 else 0
+                new_y_left = keyframe.co[1] + dy
+                
+                keyframe.handle_left[0] = new_x_left
+                keyframe.handle_left[1] = new_y_left
 
             for area in context.screen.areas:
                 if area.type in {'GRAPH_EDITOR', 'VIEW_3D'}:
                     area.tag_redraw()
             
             return {'RUNNING_MODAL'}
-
+        
+        elif event.type == 'WHEELUPMOUSE' or event.type == 'WHEELDOWNMOUSE':
+            self.invert_effect = not self.invert_effect
+            # KORREKTUR: Setze die Initialmausposition zurück, um ein Springen zu verhindern
+            self.initial_mouse_x = event.mouse_x
+            if self.invert_effect == 1:
+                self.report({'INFO'}, "EXTRUDE")
+            else:
+                self.report({'INFO'}, "SLIDE")
+            for area in context.screen.areas:
+                if area.type in {'GRAPH_EDITOR', 'VIEW_3D'}:
+                    area.tag_redraw()
+            return {'RUNNING_MODAL'}
+        
         elif event.type == 'LEFTMOUSE':
             set_handles_aligned(context, self.initial_types_left_batch)
             set_handles_aligned(context, self.initial_types_right_batch)
@@ -3074,6 +3460,7 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
             context.window.cursor_set('DEFAULT')
             if self._timer:
                 context.window_manager.event_timer_remove(self._timer)
+            self.invert_effect = False
             return {'FINISHED'}
         
         elif event.type in {'RIGHTMOUSE', 'ESC'}:
@@ -3086,11 +3473,14 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
             context.window.cursor_set('DEFAULT')
             if self._timer:
                 context.window_manager.event_timer_remove(self._timer)
+            self.invert_effect = False
             return {'CANCELLED'}
 
         return {'RUNNING_MODAL'}
     
     def invoke(self, context, event):
+        self.report({'INFO'}, "EXTRUDE")
+        # ... (dein restlicher invoke Code bleibt unverändert) ...
         if context.active_object is None or context.active_object.animation_data is None:
             self.report({'WARNING'}, "No active object")
             return {'CANCELLED'}
@@ -3101,33 +3491,35 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
         
         self.initial_vectors_left_batch.clear()
         self.initial_types_left_batch.clear()
+        self.initial_keyframe_coords_left_batch.clear()
+        self.initial_partner_x_coords_left.clear()
+        
         self.initial_vectors_right_batch.clear()
         self.initial_types_right_batch.clear()
-        self.initial_keyframe_coords_left_batch.clear()
         self.initial_keyframe_coords_right_batch.clear()
-
+        self.initial_partner_x_coords_right.clear()
+        
+        self.initial_keyframe_distances.clear()
+        
         has_valid_pair = False
-
+        
         for fcurve in context.selected_visible_fcurves:
-            # Sammle Keyframes mit ihrem Index
             selected_keyframes_with_indices = [(index, kf) for index, kf in enumerate(fcurve.keyframe_points) if kf.select_control_point]
 
             if len(selected_keyframes_with_indices) >= 2:
                 has_valid_pair = True
                 
-                # Sortiere nach der X-Koordinate (Frame)
                 selected_keyframes_with_indices.sort(key=lambda item: item[1].co[0])
                 
-                # Hol den Index und das Keyframe-Objekt des ersten und letzten Elements
                 first_keyframe_index, first_keyframe = selected_keyframes_with_indices[0]
                 last_keyframe_index, last_keyframe = selected_keyframes_with_indices[-1]
 
-                # Erstelle die Keys mit dem korrekten Index
+                keyframe_x_distance = last_keyframe.co[0] - first_keyframe.co[0]
+                self.initial_keyframe_distances[(fcurve.data_path, first_keyframe_index, fcurve.array_index)] = keyframe_x_distance
+                self.initial_keyframe_distances[(fcurve.data_path, last_keyframe_index, fcurve.array_index)] = keyframe_x_distance
+
                 key_first = (fcurve.data_path, first_keyframe_index, fcurve.array_index)
                 key_last = (fcurve.data_path, last_keyframe_index, fcurve.array_index)
-                
-                # ... Rest des Codes bleibt gleich
-                # Speichern der Daten in den Batches mit den neuen, korrekten Keys
                 
                 self.initial_types_left_batch[key_first] = {
                     'left': first_keyframe.handle_left_type,
@@ -3138,6 +3530,7 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
                     'right': (first_keyframe.handle_right[0] - first_keyframe.co[0], first_keyframe.handle_right[1] - first_keyframe.co[1]),
                 }
                 self.initial_keyframe_coords_left_batch[key_first] = {'co_x': first_keyframe.co[0], 'co_y': first_keyframe.co[1]}
+                self.initial_partner_x_coords_left[key_first] = last_keyframe.co[0]
                 
                 self.initial_types_right_batch[key_last] = {
                     'left': last_keyframe.handle_left_type,
@@ -3148,6 +3541,7 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
                     'right': (last_keyframe.handle_right[0] - last_keyframe.co[0], last_keyframe.handle_right[1] - last_keyframe.co[1]),
                 }
                 self.initial_keyframe_coords_right_batch[key_last] = {'co_x': last_keyframe.co[0], 'co_y': last_keyframe.co[1]}
+                self.initial_partner_x_coords_right[key_last] = first_keyframe.co[0]
         
         if not has_valid_pair:
             self.report({'WARNING'}, "Es wurden keine F-Kurven gefunden, die mindestens zwei ausgewählte Keyframes enthalten.")
@@ -3165,7 +3559,6 @@ class OBJECT_OT_shrink_batches(bpy.types.Operator):
             context.scene.frame_current = context.scene.frame_start
 
         context.window.cursor_set('SCROLL_X')
-        self._timer = context.window_manager.event_timer_add(0.01, window=context.window)
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
@@ -3174,8 +3567,7 @@ class OBJECT_OT_randomize_handle_extrusion(bpy.types.Operator):
     bl_idname = "object.randomize_handle_extrusion"
     bl_label = "Randomize Handle Extrusion"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Randomize handle extrusion lengths. \n" \
-                     "Mousewheel for seed"
+    bl_description = "Mousewheel for seed. Randomize handle extrusion"
 
     _timer = None
     initial_mouse_x = None
@@ -3256,6 +3648,7 @@ class OBJECT_OT_randomize_handle_extrusion(bpy.types.Operator):
 
     def modal(self, context, event):
         if event.type == 'MOUSEMOVE':
+            
             if event.mouse_x < 5 or event.mouse_x > context.window.width - 5:
                 if event.mouse_x < 5:
                     new_x = context.window.width - 10
@@ -3266,6 +3659,8 @@ class OBJECT_OT_randomize_handle_extrusion(bpy.types.Operator):
             
             base_divisor = 1000.0 if event.alt else 200.0
             delta_x = event.mouse_x - self.initial_mouse_x
+            
+            delta_x = max(0.0, delta_x)
             
             power_exponent = 2.0
             abs_delta_x = abs(delta_x)
@@ -3392,7 +3787,7 @@ class OBJECT_OT_move_keys_to_cursor(bpy.types.Operator):
     bl_idname = "object.move_keys_to_cursor"
     bl_label = "Move Keys to Cursor"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Moves all selected keyframes to the timeline cursor, preserving their curve shape."
+    bl_description = "Sets selected keyframes to the timeline cursor frame, preserving their handles"
 
     @classmethod
     def poll(cls, context):
@@ -3442,62 +3837,48 @@ class OBJECT_OT_move_keys_to_cursor(bpy.types.Operator):
         return {'FINISHED'}
 
 
-class GRAPH_PT_handle_manipulator(bpy.types.Panel):
-    bl_label = "Handle Manipulator"
-    bl_idname = "GRAPH_PT_handle_manipulator"
+
+        
+
+        
+        
+
+
+class GRAPH_PT_sub_options1(bpy.types.Panel):
+    bl_label = "Advanced"
+    bl_idname = "GRAPH_PT_sub_options_advanced1"  # Eindeutige ID
+    bl_parent_id = "GRAPH_PT_handle_manipulator"
     bl_space_type = 'GRAPH_EDITOR'
     bl_region_type = 'UI'
-    bl_category = "Tools"
 
     def draw(self, context):
         layout = self.layout
-        scene = context.scene
-        
+        scene = context.scene 
         button_height_scale = 1.4
         factor = 1/1.5
         sep2 = button_height_scale/factor
         sep1 = factor
-
         col = layout.column(align=True)
         col.scale_y = button_height_scale
-    
-        
         
         #basics
-        row = col.row(align=True)
-        
-        row.operator(OBJECT_OT_manipulate_handles.bl_idname, text="Extrude",icon='HANDLE_ALIGNED')
-        row.operator(OBJECT_OT_slide_handles.bl_idname, text="Slide",icon='ARROW_LEFTRIGHT')
-        
-        
         
         row = col.row(align=True)
-        row.operator(OBJECT_OT_manipulate_left_handles.bl_idname, text="Left")
-        row.operator(OBJECT_OT_manipulate_right_handles.bl_idname, text="Right")
-        
-                
-        col.separator(factor=sep1)
+        row.operator(OBJECT_OT_manipulate_handles.bl_idname, text="Left/Right",icon='HANDLE_ALIGNED') 
         
         row = col.row(align=True)
-        row.operator("object.shrink_batches", text="Extrude",icon='AREA_SWAP')
-        row.operator("object.manipulate_handles_between_frames", text="Slide",icon='AREA_SWAP')
-        
-        col.separator(factor=sep1)
-        row = col.row(align=True)
-        row.operator("OBJECT_OT_rotate_keys", text="Rotate",icon='GESTURE_ROTATE') 
-        row.operator("OBJECT_OT_flatten_keys", text="Flatten",icon='REMOVE') 
-       
-    
-        #keyframe
-        col.label(text="Keyframe")
-        row = col.row(align=True)
-        row.operator("graph.scale_keyframes_x",icon='CENTER_ONLY')
         row.operator("graph.move_keyframes_x",icon='TRACKING_FORWARDS_SINGLE')
         
+        row = col.row(align=True)
+        row.operator("object.extrude_handles_between_frames", text="Extrude/Slide I",icon='AREA_SWAP')
         
-        #random  
-        col.label(text="Random")
         
+        
+        
+        
+        
+        
+        col.label(text="Randomize")
         row = col.row(align=True)
         row.operator("object.randomize_handle_extrusion", text="Extrusion",icon='HANDLE_ALIGNED')
         row.operator("object.randomize_handle_rotation", text="Rotation",icon='GESTURE_ROTATE')
@@ -3506,14 +3887,41 @@ class GRAPH_PT_handle_manipulator(bpy.types.Panel):
         row.operator("object.random_x_pos", text="X-Value",icon='TRACKING_FORWARDS_SINGLE')   
         row.operator("OBJECT_OT_randomize_keys", text="Y-Value",icon='EMPTY_SINGLE_ARROW')
         
+        #col.separator(factor= sep1)
         row = col.row(align=True)
         row.prop(context.scene, "use_bone_randomization", toggle=True, text="On bones",icon='BONE_DATA')
-        
+
+
+class GRAPH_PT_sub_options2(bpy.types.Panel):
+    bl_label = "Options"
+    bl_idname = "GRAPH_PT_sub_options_advanced2"  # Eindeutige ID
+    bl_parent_id = "GRAPH_PT_handle_manipulator"
+    bl_space_type = 'GRAPH_EDITOR'
+    bl_region_type = 'UI'
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene 
+        button_height_scale = 1.4
+        factor = 1/1.5
+        sep2 = button_height_scale/factor
+        sep1 = factor
+        col = layout.column(align=True)
+        col.scale_y = button_height_scale
         
         #options
-        col.label(text="Options")
+        #col.label(text="Options")
+        if context.active_object and context.active_object.type == 'ARMATURE':
+            row = col.row(align=True)
+            # Verwende den Operator anstelle der Property
+            row.operator(OBJECT_OT_toggle_bones_isolation.bl_idname, text="Isolate Bones", icon='POINTCLOUD_POINT')
+        else:
+            col.label(text="Isolate Bones (Select Armature)")
+        col.operator("object.move_keys_to_cursor", text="Set to cursor",icon='TRIA_UP')
+        col.operator("graph.decimate_unselected", text="Decimate",icon='MOD_DECIM')
         
         
+        col.separator(factor=sep1)
         filter_row = col.row(align=True)
         filter_row.scale_x = 0.8
         filter_row.scale_y = button_height_scale/1.5
@@ -3528,57 +3936,142 @@ class GRAPH_PT_handle_manipulator(bpy.types.Panel):
         filter_row.prop(scene, "filter_y", toggle=True, text="Y",icon='NODE_SOCKET_SHADER')
         filter_row.prop(scene, "filter_z", toggle=True, text="Z",icon='NODE_SOCKET_STRING')
         
-        
-        col.separator(factor=sep1)
-                
-        if context.active_object and context.active_object.type == 'ARMATURE':
-            row = col.row(align=True)
-            row.prop(context.scene, "is_bones_isolated", toggle=True, text="Isolate Bones",icon='POINTCLOUD_POINT')
-        else:
-            col.label(text="Isolate Bones (Select Armature)")
-            
         col.separator(factor=sep1)
         row = col.row(align=True)
-        row.prop(context.scene, "keep_framerange", toggle=True, text="Keep Framerange",icon='TIME')
+        row.prop(context.scene, "keep_framerange", toggle=True, text="Normal Range",icon='TIME')
 
         row = col.row(align=True)
         row.prop(scene, "additional_preframes", text="Preframes")
         row.prop(scene, "additional_postframes", text="Postframes")
         
         
-        #additionals
-        col.label(text="Additionals")
-        col.operator("object.move_keys_to_cursor", text="Move to cursor",icon='TRIA_UP')
-        col.separator(factor=sep1)
-        col.operator("graph.decimate_unselected", text="Decimate Keyframes",icon='MOD_DECIM')
         
-        col.label(text="Quick Navigation")
-        row = col.row(align=True)
-        row.operator("graph.select_previous_keys", text="Previous")
-        row.operator("graph.select_next_keys", text="Next")
-        row = col.row(align=True)
-        row.operator("graph.subtract_keys", text="-")
-        row.operator("graph.add_next_keys", text="+")
         
+'''class GRAPH_PT_sub_options3(bpy.types.Panel):
+    bl_label = "Randomization"
+    bl_idname = "GRAPH_PT_sub_options_advanced3"  # Eindeutige ID
+    bl_parent_id = "GRAPH_PT_handle_manipulator"
+    bl_space_type = 'GRAPH_EDITOR'
+    bl_region_type = 'UI'
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene 
+        button_height_scale = 1.4
+        factor = 1/1.5
+        sep2 = button_height_scale/factor
+        sep1 = factor
         col = layout.column(align=True)
+        col.scale_y = button_height_scale
+        
+        
+        
+class GRAPH_PT_sub_options4(bpy.types.Panel):
+    bl_label = "Operations"
+    bl_idname = "GRAPH_PT_sub_options_advanced4"  # Eindeutige ID
+    bl_parent_id = "GRAPH_PT_handle_manipulator"
+    bl_space_type = 'GRAPH_EDITOR'
+    bl_region_type = 'UI'
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene 
+        button_height_scale = 1.4
+        factor = 1/1.5
+        sep2 = button_height_scale/factor
+        sep1 = factor
+        col = layout.column(align=True)
+        col.scale_y = button_height_scale
+        
+        #options
+        
+        
+        
+        
+        
+        
+        
+class GRAPH_PT_sub_options5(bpy.types.Panel):
+    bl_label = "Old"
+    bl_idname = "GRAPH_PT_sub_options_advanced5"  # Eindeutige ID
+    bl_parent_id = "GRAPH_PT_handle_manipulator"
+    bl_space_type = 'GRAPH_EDITOR'
+    bl_region_type = 'UI'
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene 
+        button_height_scale = 1.4
+        factor = 1/1.5
+        sep2 = button_height_scale/factor
+        sep1 = factor
+        col = layout.column(align=True)
+        col.scale_y = button_height_scale
+        
+        #options
+        #col.label(text="Options")
+        
+        
+        row = col.row(align=True)
+        row.operator("object.manipulate_right_handles", text="asd")'''
         
         
         
 
+class GRAPH_PT_handle_manipulator(bpy.types.Panel):
+    bl_label = "Handle Manipulator"
+    bl_idname = "GRAPH_PT_handle_manipulator"
+    bl_space_type = 'GRAPH_EDITOR'
+    bl_region_type = 'UI'
+    bl_category = "Tools"
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene 
+        button_height_scale = 1.4
+        factor = 1/1.5
+        sep2 = button_height_scale/factor
+        sep1 = factor
+        col = layout.column(align=True)
+        col.scale_y = button_height_scale
+        
+        #basics
+        row = col.row(align=True)
+        row.operator(OBJECT_OT_scale_handles.bl_idname, text="Scale Handles",icon='ORIENTATION_VIEW')
+        #col.separator(factor=sep1)
+        
+        
+        row = col.row(align=True)
+        row.operator("OBJECT_OT_rotate_keys", text="Rotate",icon='GESTURE_ROTATE') 
+        row.operator("OBJECT_OT_flatten_keys", text="Flatten",icon='REMOVE') 
+        
+        col.separator(factor=sep1)
+        row = col.row(align=True)
+        row.operator("object.extrude_slide_handles_between_frames", text="Extrude/Slide X/Y",icon='AREA_SWAP')
+        
+        #col.separator(factor=sep1)
+        row = col.row(align=True)
+        row.operator("graph.scale_keyframes_x",icon='CENTER_ONLY')
         
         
         
+        
+        
+        
+        
+
+
 addon_keymaps = []
 
         
 def register():
     bpy.utils.register_class(OBJECT_OT_randomize_keys)
     bpy.utils.register_class(OBJECT_OT_manipulate_handles)
-    bpy.utils.register_class(OBJECT_OT_manipulate_left_handles)
+    bpy.utils.register_class(OBJECT_OT_scale_handles)
     bpy.utils.register_class(OBJECT_OT_manipulate_right_handles)
     bpy.utils.register_class(OBJECT_OT_rotate_keys)
-    bpy.utils.register_class(OBJECT_OT_manipulate_handles_between_frames)
-    bpy.utils.register_class(OBJECT_OT_shrink_batches)
+    bpy.utils.register_class(OBJECT_OT_extrude_slide_handles_between_frames)
+    bpy.utils.register_class(OBJECT_OT_extrude_handles_between_frames)
     bpy.utils.register_class(GRAPH_OT_decimate_unselected)
     bpy.utils.register_class(GRAPH_PT_handle_manipulator)
     bpy.utils.register_class(BONES_OT_toggle_unselected_bones)
@@ -3594,6 +4087,13 @@ def register():
     bpy.utils.register_class(OBJECT_OT_move_keys_to_cursor)
     bpy.utils.register_class(OBJECT_OT_flatten_keys)
     bpy.utils.register_class(OBJECT_OT_slide_handles)
+    bpy.utils.register_class(OBJECT_OT_toggle_bones_isolation)
+    bpy.utils.register_class(GRAPH_PT_sub_options2)
+    bpy.utils.register_class(GRAPH_PT_sub_options1)
+    #bpy.utils.register_class(GRAPH_PT_sub_options3)
+    #bpy.utils.register_class(GRAPH_PT_sub_options4)
+    #bpy.utils.register_class(GRAPH_PT_sub_options5)
+    
     
     
 
@@ -3657,6 +4157,15 @@ def register():
             type='NUMPAD_2', 
             value='PRESS'
         )
+        kmi_play_pause = km.keymap_items.new(
+            'screen.animation_play',  # Der Operator für Play/Pause
+            type='NUMPAD_4',  # Die Taste
+            value='PRESS'
+        )
+        
+        
+        
+        
         # Speichere die Keymap-Instanz
         addon_keymaps.append(km)
 
@@ -3665,11 +4174,11 @@ def register():
 def unregister():
     bpy.utils.unregister_class(OBJECT_OT_randomize_keys)
     bpy.utils.unregister_class(OBJECT_OT_manipulate_handles)
-    bpy.utils.unregister_class(OBJECT_OT_manipulate_left_handles)
+    bpy.utils.unregister_class(OBJECT_OT_scale_handles)
     bpy.utils.unregister_class(OBJECT_OT_manipulate_right_handles)
     bpy.utils.unregister_class(OBJECT_OT_rotate_keys)
-    bpy.utils.unregister_class(OBJECT_OT_manipulate_handles_between_frames)
-    bpy.utils.unregister_class(OBJECT_OT_shrink_batches)
+    bpy.utils.unregister_class(OBJECT_OT_extrude_slide_handles_between_frames)
+    bpy.utils.unregister_class(OBJECT_OT_extrude_handles_between_frames)
     bpy.utils.unregister_class(GRAPH_PT_handle_manipulator)
     bpy.utils.unregister_class(BONES_OT_toggle_unselected_bones)
     bpy.utils.unregister_class(GRAPH_OT_decimate_unselected)
@@ -3685,6 +4194,13 @@ def unregister():
     bpy.utils.unregister_class(OBJECT_OT_move_keys_to_cursor)
     bpy.utils.unregister_class(OBJECT_OT_flatten_keys)
     bpy.utils.unregister_class(OBJECT_OT_slide_handles)
+    bpy.utils.unregister_class(OBJECT_OT_toggle_bones_isolation)
+    bpy.utils.unregister_class(GRAPH_PT_sub_options1)
+    bpy.utils.unregister_class(GRAPH_PT_sub_options2)
+    #bpy.utils.unregister_class(GRAPH_PT_sub_options3)
+    #bpy.utils.unregister_class(GRAPH_PT_sub_options4)
+    #bpy.utils.unregister_class(GRAPH_PT_sub_options5)
+
 
     del bpy.types.Scene.vorschau
     del bpy.types.Scene.nachschau
@@ -3705,5 +4221,8 @@ def unregister():
 
 if __name__ == "__main__":
     register()
-
-
+    
+    
+    #extrude: verändert wert und timing
+    #in x: verändert timing, wert bleibt gleich
+    #in y: verändert wert, timing bleibt gleich
