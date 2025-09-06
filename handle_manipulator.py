@@ -950,7 +950,7 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
     bl_idname = "object.rotate_keys"
     bl_label = "Rotate Keyframes"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Mousewheel for sensitivity. Rotation dependant on the value of the next keyframe"
+    bl_description = "Mousewheel for sensitivity. Rotation direction and strength is dependant on next keyframe"
                  
 
     _initial_keyframe_data = {}
@@ -2765,7 +2765,7 @@ class OBJECT_OT_scale_handles(bpy.types.Operator):
     bl_idname = "object.scale_handles"
     bl_label = "scale handles"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Mousewheel for X- or Initial-Axis"
+    bl_description = "Mousewheel for Y- or X-Axis"
     
     _timer = None
     initial_mouse_x = None
@@ -2812,7 +2812,7 @@ class OBJECT_OT_scale_handles(bpy.types.Operator):
             elif self._mode == 'Y_AXIS':
                 factor = delta_x / 200.0
             else: # 'XY_AXIS'
-                factor = delta_x / 200.0 if abs(delta_x) > abs(delta_y) else delta_y / 200.0
+                factor = delta_x / 200.0
 
             for key, initial_vectors in self.initial_handle_vectors.items():
                 data_path, keyframe_index, array_index = key
@@ -2945,7 +2945,7 @@ class OBJECT_OT_scale_handles(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def invoke(self, context, event):
-        self.report({'INFO'}, f"Y-Axis")
+        self.report({'INFO'}, f"Initial-Axis")
         if context.active_object is None or context.active_object.animation_data is None:
             self.report({'WARNING'}, "Kein aktives Objekt oder keine Animationsdaten.")
             return {'CANCELLED'}
@@ -2962,7 +2962,7 @@ class OBJECT_OT_scale_handles(bpy.types.Operator):
 
         self.initial_mouse_x = event.mouse_x
         self.initial_mouse_y = event.mouse_y
-        self._mode = 'Y_AXIS'
+        self._mode = 'XY_AXIS'
         self.initial_handle_vectors.clear()
         self.initial_handle_types.clear()
         self.initial_keyframe_data.clear()
