@@ -1,8 +1,6 @@
-How to use:
+Quick navigation:
 
-<img width="300" height="500" alt="1077117" src="https://github.com/user-attachments/assets/69c8e63d-8a53-40a5-84f9-cb251c67d2d9" align="left" width="10%" />
+<img width="300" height="500" alt="1077117" src="https://github.com/user-attachments/assets/38d42394-917f-41b2-a69e-8562ef83e003"   />
 
-NumPad for quick navigation
 
-<br clear="left"/>
-adfdasf
+Some operators have mousewheel functions
