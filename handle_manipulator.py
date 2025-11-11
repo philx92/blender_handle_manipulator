@@ -1,3 +1,11 @@
+# README
+#
+# Custom Keymap (Mouse over Graph editor):
+# NUMPAD 1,2,3,5: Navigate keyframe selection
+# NUMPAD 4: Play/Pause
+# NUMPAD 6: Play every frame/frame dropping
+
+
 import bpy
 import math
 import random
@@ -8,13 +16,13 @@ from bpy.props import IntProperty
 bpy.types.Scene.additional_preframes = IntProperty(
     name="Add Preframes",
     description="Frames before selection",
-    default=5
+    default=7
 )
 
 bpy.types.Scene.additional_postframes = IntProperty(
     name="Add Postframes",
     description="Frames after selection",
-    default=5
+    default=7
 )
 
 bpy.types.Scene.use_bone_randomization = bpy.props.BoolProperty(
@@ -38,7 +46,7 @@ bl_info = {
 
 bpy.types.Scene.keep_framerange = bpy.props.BoolProperty(
     name="Keep Framerange",
-    description="Selection dependant framerange while animation is running by default. Toggle on for normal framerange",
+    description="Selection dependant framerange while animation is running. Toggle on to keep default framerange",
     default=False 
 )
 
@@ -72,6 +80,11 @@ class OBJECT_OT_toggle_bones_isolation(bpy.types.Operator):
     bl_idname = "object.toggle_bones_isolation"
     bl_label = "Isolate Bones"
     bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        # Überprüfe, ob ein aktives Objekt existiert und es vom Typ 'ARMATURE' ist
+        return context.active_object and context.active_object.type == 'ARMATURE'
 
     def execute(self, context):
         context.scene.is_bones_isolated = not context.scene.is_bones_isolated
@@ -523,7 +536,9 @@ class GRAPH_OT_decimate_unselected(bpy.types.Operator):
     def poll(cls, context):
         return (context.active_object and
                 context.active_object.animation_data and
-                context.active_object.animation_data.action)
+                context.active_object.animation_data.action and
+                context.selected_visible_fcurves and
+                len([kf for fc in context.selected_visible_fcurves for kf in fc.keyframe_points if kf.select_control_point]) > 0)
 
     def execute(self, context):
         if not (context.active_object and context.active_object.animation_data and context.active_object.animation_data.action):
@@ -601,11 +616,10 @@ class GRAPH_OT_scale_keyframes_x(bpy.types.Operator):
     
     def modal(self, context, event):
         if event.type == 'MOUSEMOVE':
-            # 1. Maus-Warping-Logik
             window_width = context.window.width
             mouse_x = event.mouse_x
             
-            # Speichere die ursprüngliche Mausposition
+            # Maus-Warping-Logik
             original_mouse_x = mouse_x
 
             if mouse_x < 5 or mouse_x > window_width - 5:
@@ -630,8 +644,10 @@ class GRAPH_OT_scale_keyframes_x(bpy.types.Operator):
                 initial_handle_left_x = keyframe_data['handle_left_x']
                 initial_handle_right_x = keyframe_data['handle_right_x']
 
-                new_frame = self._origin_frame + (initial_frame - self._origin_frame) * scale_factor
+                # Runden der neuen Frame-Position auf ganze Zahlen
+                new_frame = round(self._origin_frame + (initial_frame - self._origin_frame) * scale_factor)
                 
+                # Die Handle-Positionen werden relativ zum neuen Keyframe-Frame berechnet
                 handle_left_dx = (initial_handle_left_x - initial_frame) * scale_factor
                 handle_right_dx = (initial_handle_right_x - initial_frame) * scale_factor
 
@@ -643,50 +659,42 @@ class GRAPH_OT_scale_keyframes_x(bpy.types.Operator):
             
             # Verschiebung der nachfolgenden Keyframes und der rechten Timeline-Grenze
             if self._keyframes_after_data:
-                # Berechne die Verschiebung basierend auf der Skalierung des letzten ausgewählten Keyframes
                 last_selected_frame_initial = self._keyframes_initial_data[-1]['frame']
-                last_selected_frame_new = self._origin_frame + (last_selected_frame_initial - self._origin_frame) * scale_factor
+                last_selected_frame_new = round(self._origin_frame + (last_selected_frame_initial - self._origin_frame) * scale_factor)
                 displacement_factor = last_selected_frame_new - last_selected_frame_initial
 
                 for keyframe_data in self._keyframes_after_data:
                     keyframe = keyframe_data['keyframe']
-                    keyframe.co[0] = keyframe_data['initial_frame'] + displacement_factor
-                    keyframe.handle_left[0] = keyframe_data['initial_handle_left_x'] + displacement_factor
-                    keyframe.handle_right[0] = keyframe_data['initial_handle_right_x'] + displacement_factor
+                    keyframe.co[0] = round(keyframe_data['initial_frame'] + displacement_factor)
+                    keyframe.handle_left[0] = round(keyframe_data['initial_handle_left_x'] + displacement_factor)
+                    keyframe.handle_right[0] = round(keyframe_data['initial_handle_right_x'] + displacement_factor)
 
-                # NEUE LOGIK HIER: Anpassung der Timeline-Grenzen
                 if context.screen.is_animation_playing and not context.scene.keep_framerange:
                     if self._last_unselected_frame is not None:
                         new_unselected_frame = self._last_unselected_frame + displacement_factor
                         context.scene.frame_end = int(new_unselected_frame + context.scene.additional_postframes)
                     else:
-                        # Falls keine nachfolgenden Keyframes existieren, verwende den letzten ausgewählten
                         if new_frame_positions:
                             context.scene.frame_end = int(max(new_frame_positions) + context.scene.additional_postframes)
             
             else:
-                # Falls keine nachfolgenden Keyframes existieren
                 if context.screen.is_animation_playing and not context.scene.keep_framerange:
                     if new_frame_positions:
                         context.scene.frame_end = int(max(new_frame_positions) + context.scene.additional_postframes)
 
-            # Anpassung der linken Timeline-Grenze (Diese Logik ist bereits korrekt)
+            # Anpassung der linken Timeline-Grenze
             if new_frame_positions and context.screen.is_animation_playing and not context.scene.keep_framerange:
                 min_frame = min(new_frame_positions)
                 context.scene.frame_start = int(min_frame - context.scene.additional_preframes)
                 
-                # Passe den aktuellen Frame an, wenn die Skalierung ihn außerhalb der sichtbaren
-                # Region verschiebt
                 if context.scene.frame_current < context.scene.frame_start:
                     context.scene.frame_current = context.scene.frame_start
                 elif context.scene.frame_current > context.scene.frame_end:
                     context.scene.frame_current = context.scene.frame_end
 
-
             context.area.tag_redraw()
 
         elif event.type == 'LEFTMOUSE' and event.value == 'RELEASE':
-            # Endet den Operator und stellt die Timeline-Grenzen zurück
             context.scene.frame_start = self._initial_frame_start
             context.scene.frame_end = self._initial_frame_end
             return {'FINISHED'}
@@ -950,13 +958,12 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
     bl_idname = "object.rotate_keys"
     bl_label = "Rotate Keyframes"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Mousewheel for sensitivity. Rotation direction and strength is dependant on next keyframe"
-                 
-
+    bl_description = "Rotate handles relative to the curve of the previous frame"
+                
     _initial_keyframe_data = {}
     
     initial_mouse_x = None
-    _strength_multiplier = 0.5
+    _strength_multiplier = 0.5 
     
     # Empfindlichkeit in Grad pro Pixel
     _degrees_per_pixel = 10
@@ -982,24 +989,10 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
             
             keyframe = fcurve.keyframe_points[keyframe_index]
             
-            direction = 0.0
-            strength_multiplier = 0.0
+            # Gespeicherte Initialwerte verwenden
+            direction = initial_data['initial_direction']
+            strength_multiplier = initial_data['initial_strength']
             
-            # 1. Versuche, die Richtung und Stärke am nächsten Keyframe zu bestimmen
-            if keyframe_index + 1 < len(fcurve.keyframe_points):
-                next_keyframe = fcurve.keyframe_points[keyframe_index + 1]
-                if next_keyframe.co[1] != keyframe.co[1]:
-                    direction = 1.0 if next_keyframe.co[1] > keyframe.co[1] else -1.0
-                    strength_multiplier = abs(next_keyframe.co[1] - keyframe.co[1])
-            
-            # 2. Wenn der nächste Keyframe nicht verfügbar oder auf gleicher Höhe ist, versuche es mit dem vorherigen Keyframe
-            if direction == 0.0 and keyframe_index > 0:
-                previous_keyframe = fcurve.keyframe_points[keyframe_index - 1]
-                if previous_keyframe.co[1] != keyframe.co[1]:
-                    direction = 1.0 if previous_keyframe.co[1] < keyframe.co[1] else -1.0
-                    strength_multiplier = abs(previous_keyframe.co[1] - keyframe.co[1])
-            
-            # Wenn keine Richtung oder Stärke gefunden wurde, fahre mit dem nächsten Keyframe fort
             if direction == 0.0 or strength_multiplier == 0.0:
                 continue
 
@@ -1010,7 +1003,7 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
             cos_angle = math.cos(rotation_angle_radians)
             sin_angle = math.sin(rotation_angle_radians)
             
-            # ... (der Rest der Rotationslogik bleibt gleich)
+            # Rotationslogik
             x1, y1 = initial_data['handle_left_vec'][0], initial_data['handle_left_vec'][1]
             rx1 = x1 * cos_angle - y1 * sin_angle
             ry1 = x1 * sin_angle + y1 * cos_angle
@@ -1029,13 +1022,14 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
                 area.tag_redraw()
 
     def modal(self, context, event):
+        # ... (Modal-Logik bleibt unverändert) ...
         if event.type == 'MOUSEMOVE':
             if event.mouse_x < 5 or event.mouse_x > context.window.width - 5:
                 if event.mouse_x < 5:
                     new_x = context.window.width - 10
                 else:
                     new_x = 10
-                
+                    
                 self.initial_mouse_x += (new_x - event.mouse_x)
                 context.window.cursor_warp(new_x, event.mouse_y)
             delta_x = (event.mouse_x - self.initial_mouse_x) * 100
@@ -1044,15 +1038,12 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
             rotation_strength_degrees = delta_x * self._degrees_per_pixel * 0.0001
             
             self._apply_rotation(context, rotation_strength_degrees)
-            # Ausgabe auf Grad ändern
-            #self.report({'INFO'}, f"Rotation Sensitivity: {self._degrees_per_pixel:.2f} ")
             return {'RUNNING_MODAL'}
             
         elif event.type == 'WHEELUPMOUSE':
             self._degrees_per_pixel *= 1.5
             
-            # HIER wird der Maus-Startwert neu gesetzt
-            self.initial_mouse_x = event.mouse_x
+            self.initial_mouse_x = event.mouse_x 
 
             delta_x = event.mouse_x - self.initial_mouse_x
             rotation_strength_degrees = delta_x * self._degrees_per_pixel
@@ -1064,7 +1055,6 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
             self._degrees_per_pixel /= 1.5
             self._degrees_per_pixel = max(0.01, self._degrees_per_pixel)
             
-            # HIER wird der Maus-Startwert neu gesetzt
             self.initial_mouse_x = event.mouse_x
 
             delta_x = event.mouse_x - self.initial_mouse_x
@@ -1091,8 +1081,6 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
             context.window.cursor_set('DEFAULT')
             return {'FINISHED'}
         
-        
-
         elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
             for (data_path, keyframe_index, array_index), initial_data in self._initial_keyframe_data.items():
                 fcurve = None
@@ -1121,52 +1109,49 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
     def invoke(self, context, event):
         self.report({'INFO'}, f"Rotation Sensitivity: {self._degrees_per_pixel:.2f} ")
         
-        # Filtern der Keyframes in der invoke-Methode
-        filtered_keyframes = []
-        
-        # Verwende eine Toleranz für den Vergleich der Werte
+        # Filterung entfernt. Wir arbeiten mit allen ausgewählten Keyframes.
         epsilon = 1e-6 
         
-        for fcurve in context.selected_visible_fcurves:
-            for keyframe_index, keyframe in enumerate(fcurve.keyframe_points):
-                if keyframe.select_control_point:
-                    current_value = keyframe.co[1]
-                    has_different_neighbor = False
-                    
-                    # Prüfen auf vorherigen Keyframe
-                    if keyframe_index > 0:
-                        prev_keyframe = fcurve.keyframe_points[keyframe_index - 1]
-                        if abs(prev_keyframe.co[1] - current_value) > epsilon:
-                            has_different_neighbor = True
-                    
-                    # Prüfen auf nächsten Keyframe
-                    if not has_different_neighbor and keyframe_index < len(fcurve.keyframe_points) - 1:
-                        next_keyframe = fcurve.keyframe_points[keyframe_index + 1]
-                        if abs(next_keyframe.co[1] - current_value) > epsilon:
-                            has_different_neighbor = True
-                    
-                    if has_different_neighbor:
-                        filtered_keyframes.append(keyframe)
-        
-        if not filtered_keyframes:
-            self.report({'WARNING'}, "Neighbouring keys have the same value")
-            return {'CANCELLED'}
-
         self._initial_frame_start = context.scene.frame_start
         self._initial_frame_end = context.scene.frame_end
+        
+        # WIEDER EINGEFÜGTE FRAMERANGE-LOGIK!
+        # Voraussetzung: Es gibt irgendwo in deiner Umgebung ein bpy.context.scene.keep_framerange Property
         if not context.scene.keep_framerange and context.screen.is_animation_playing:
             set_timeline_range_to_selected(context)
-            
-        if context.screen.is_animation_playing:
-            context.scene.frame_current = context.scene.frame_start
+            if context.screen.is_animation_playing:
+                context.scene.frame_current = context.scene.frame_start
 
         self._initial_keyframe_data.clear()
         self.initial_mouse_x = event.mouse_x
 
-        # Speichern nur der gefilterten Keyframes
+        # Speichern mit einmalig berechneter Steigungs-Info
+        found_rotatable_keyframe = False
         for fcurve in context.selected_visible_fcurves:
             for keyframe_index, keyframe in enumerate(fcurve.keyframe_points):
-                if keyframe in filtered_keyframes:
+                # PRÜFUNG: Nur ausgewählte Keyframes verarbeiten
+                if keyframe.select_control_point:
+                    found_rotatable_keyframe = True
+                    
+                    # Steigung nur einmal berechnen
+                    direction = 0.0
+                    strength_multiplier = 0.0
+                    current_frame = keyframe.co[0]
+                    frame_before = current_frame - 1.0
+
+                    if frame_before >= context.scene.frame_start: 
+                        try:
+                            value_before = fcurve.evaluate(frame_before)
+                            current_value = keyframe.co[1]
+                            delta_value = current_value - value_before
+                            
+                            if abs(delta_value) > epsilon:
+                                direction = 1.0 if delta_value > 0 else -1.0
+                                strength_multiplier = abs(delta_value)
+                        except Exception:
+                            pass 
+                    
+                    # Speichern der Initialdaten und der berechneten Stärke/Richtung
                     key = (fcurve.data_path, keyframe_index, fcurve.array_index)
                     
                     self._initial_keyframe_data[key] = {
@@ -1175,20 +1160,25 @@ class OBJECT_OT_rotate_keys(bpy.types.Operator):
                         'handle_left_type': keyframe.handle_left_type,
                         'handle_right_type': keyframe.handle_right_type,
                         'handle_left_vec': (keyframe.handle_left[0] - keyframe.co[0], keyframe.handle_left[1] - keyframe.co[1]),
-                        'handle_right_vec': (keyframe.handle_right[0] - keyframe.co[0], keyframe.handle_right[1] - keyframe.co[1])
+                        'handle_right_vec': (keyframe.handle_right[0] - keyframe.co[0], keyframe.handle_right[1] - keyframe.co[1]),
+                        'initial_direction': direction,
+                        'initial_strength': strength_multiplier
                     }
+
+        if not found_rotatable_keyframe:
+             self.report({'WARNING'}, "No keyframes selected for rotation.")
+             return {'CANCELLED'}
 
         context.window.cursor_set('SCROLL_X')
         context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
-
+        return {'RUNNING_MODAL'}  
 
 
 class OBJECT_OT_flatten_keys(bpy.types.Operator):
     bl_idname = "object.flatten_keys"
     bl_label = "Flatten Keys"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Flatten, or exaggerate handle rotation"
+    bl_description = "Exaggerate/Flatten initial handle rotation"
                     
     _initial_keyframe_data = {}
     _initial_mouse_x = None
@@ -1279,7 +1269,7 @@ class OBJECT_OT_flatten_keys(bpy.types.Operator):
             # Berechne die Delta-Werte basierend auf der aktuellen Mausposition und der initialen Mausposition
             # Die initial_mouse_x wird durch das Warping korrekt angepasst,
             # sodass die Bewegung nahtlos weiterläuft.
-            delta_x = event.mouse_x - self._initial_mouse_x
+            delta_x = (event.mouse_x - self._initial_mouse_x) * (-1)
             
             _flatten_factor = self._initial_flatten_factor + delta_x * self._sensitivity
             _flatten_factor = min(1.0, _flatten_factor)
@@ -1384,7 +1374,7 @@ class OBJECT_OT_manipulate_handles(bpy.types.Operator):
     bl_idname = "object.handle_manipulator"
     bl_label = "Manipulate Handles"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Mousewheel for left or right. Extrude handles"
+    bl_description = "Scale handles in initial direction. Mousewheel for left or right handle"
     
     _timer = None
     initial_mouse_x = None
@@ -1755,36 +1745,19 @@ class OBJECT_OT_randomize_keys(bpy.types.Operator):
             return {'CANCELLED'}
         
         # Filtern der Keyframes in der invoke-Methode
-        filtered_keyframes_data = []
-        epsilon = 1e-6
-        
+        keyframes_to_randomize = []
         for fcurve in context.selected_visible_fcurves:
             for keyframe_index, keyframe in enumerate(fcurve.keyframe_points):
-                if keyframe.select_control_point:
-                    current_value = keyframe.co[1]
-                    has_different_neighbor = False
-                    
-                    # Prüfen auf vorherigen Keyframe
-                    if keyframe_index > 0:
-                        prev_keyframe = fcurve.keyframe_points[keyframe_index - 1]
-                        if abs(prev_keyframe.co[1] - current_value) > epsilon:
-                            has_different_neighbor = True
-                    
-                    # Prüfen auf nächsten Keyframe
-                    if not has_different_neighbor and keyframe_index < len(fcurve.keyframe_points) - 1:
-                        next_keyframe = fcurve.keyframe_points[keyframe_index + 1]
-                        if abs(next_keyframe.co[1] - current_value) > epsilon:
-                            has_different_neighbor = True
-                    
-                    if has_different_neighbor:
-                        filtered_keyframes_data.append({
-                            'fcurve': fcurve,
-                            'keyframe': keyframe,
-                            'keyframe_index': keyframe_index
-                        })
+                # Es wird nur noch geprüft, ob der Keyframe ausgewählt ist.
+                if keyframe.select_control_point: 
+                    keyframes_to_randomize.append({
+                        'fcurve': fcurve,
+                        'keyframe': keyframe,
+                        'keyframe_index': keyframe_index
+                    })
 
-        if not filtered_keyframes_data:
-            self.report({'WARNING'}, "Keine Keyframes gefunden, die unterschiedliche Nachbarwerte haben.")
+        if not keyframes_to_randomize:
+            self.report({'WARNING'}, "Keine Keyframes ausgewählt.")
             return {'CANCELLED'}
 
         self._initial_frame_start = context.scene.frame_start
@@ -1803,13 +1776,13 @@ class OBJECT_OT_randomize_keys(bpy.types.Operator):
             context.scene.frame_current = context.scene.frame_start
 
         # Speichern nur der gefilterten Keyframes
-        for data in filtered_keyframes_data:
+        for data in keyframes_to_randomize: 
             fcurve = data['fcurve']
             keyframe = data['keyframe']
             keyframe_index = data['keyframe_index']
             
             key = (fcurve.data_path, keyframe_index, fcurve.array_index)
-            
+             
             self.initial_keyframe_data[key] = {
                 'co_x': keyframe.co[0], 
                 'co_y': keyframe.co[1],
@@ -2034,15 +2007,17 @@ class OBJECT_OT_random_x_pos(bpy.types.Operator):
 
 class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
     bl_idname = "object.randomize_handle_rotation"
-    bl_label = "Randomize Handle Rotation" # label for button
+    bl_label = "Randomize Handle Rotation"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Mousewheel for seed. Randomize handle rotation"
+    bl_description = "Mousewheel for seed. Mouse-X for rotation, Mouse-Y for extrusion."
 
     _timer = None
     initial_mouse_x = None
+    initial_mouse_y = None  # Neu
     initial_handle_vectors = {}
     initial_handle_types = {}
-    _current_strength = 0.0
+    _current_strength_rotation = 0.0  # Neu
+    _current_strength_extrusion = 0.0 # Neu
     _current_seed = 0
     _initial_frame_start = 0
     _initial_frame_end = 0
@@ -2055,11 +2030,11 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
                 context.selected_visible_fcurves and
                 len([kf for fc in context.selected_visible_fcurves for kf in fc.keyframe_points if kf.select_control_point]) > 0)
 
-    def _apply_randomized_extrusion(self, context, strength):
+    def _apply_randomized_extrusion(self, context, strength_rotation, strength_extrusion):
         random.seed(self._current_seed)
         
-        # Dictionary zum Speichern der Zufallswerte pro Knochen
         bone_random_rotations = {}
+        bone_random_extrusions = {} # Neu: Dictionary für die Extrusionswerte pro Knochen
 
         for (data_path, keyframe_index, array_index), initial_vectors in self.initial_handle_vectors.items():
             fcurve = None
@@ -2073,22 +2048,23 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
             
             keyframe = fcurve.keyframe_points[keyframe_index]
             
-            # Neue Logik: Zufallsrotation basierend auf der Eigenschaft
             if context.scene.use_bone_randomization:
-                # Extrahiere Knochennamen aus dem data_path
                 try:
                     bone_name = data_path.split('"')[1]
                 except IndexError:
-                    bone_name = None  # Fallback für nicht-Knochen-Pfade
+                    bone_name = None
                 
                 if bone_name not in bone_random_rotations:
-                    # Berechne den Rotationswert nur einmal pro Knochen
-                    bone_random_rotations[bone_name] = random.uniform(-strength * math.pi, strength * math.pi)
+                    bone_random_rotations[bone_name] = random.uniform(-strength_rotation * math.pi, strength_rotation * math.pi)
+                
+                if bone_name not in bone_random_extrusions:
+                    bone_random_extrusions[bone_name] = random.uniform(1.0 - strength_extrusion, 1.0 + strength_extrusion)
                 
                 random_rotation_rad = bone_random_rotations.get(bone_name, 0.0)
+                random_extrusion_scale = bone_random_extrusions.get(bone_name, 1.0)
             else:
-                # Ursprüngliche Logik: Zufallsrotation pro Kanal
-                random_rotation_rad = random.uniform(-strength * math.pi, strength * math.pi)
+                random_rotation_rad = random.uniform(-strength_rotation * math.pi, strength_rotation * math.pi)
+                random_extrusion_scale = random.uniform(1.0 - strength_extrusion, 1.0 + strength_extrusion)
 
             # Linkes Handle
             vec_left_initial = initial_vectors['left']
@@ -2097,9 +2073,10 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
             if length_left_initial > 0:
                 initial_angle_left = math.atan2(vec_left_initial[1], vec_left_initial[0])
                 new_angle_left = initial_angle_left + random_rotation_rad
+                new_length_left = length_left_initial * random_extrusion_scale
                 
-                new_x_left = keyframe.co[0] + length_left_initial * math.cos(new_angle_left)
-                new_y_left = keyframe.co[1] + length_left_initial * math.sin(new_angle_left)
+                new_x_left = keyframe.co[0] + new_length_left * math.cos(new_angle_left)
+                new_y_left = keyframe.co[1] + new_length_left * math.sin(new_angle_left)
                 keyframe.handle_left[0] = new_x_left
                 keyframe.handle_left[1] = new_y_left
 
@@ -2110,9 +2087,10 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
             if length_right_initial > 0:
                 initial_angle_right = math.atan2(vec_right_initial[1], vec_right_initial[0])
                 new_angle_right = initial_angle_right + random_rotation_rad
+                new_length_right = length_right_initial * random_extrusion_scale
                 
-                new_x_right = keyframe.co[0] + length_right_initial * math.cos(new_angle_right)
-                new_y_right = keyframe.co[1] + length_right_initial * math.sin(new_angle_right)
+                new_x_right = keyframe.co[0] + new_length_right * math.cos(new_angle_right)
+                new_y_right = keyframe.co[1] + new_length_right * math.sin(new_angle_right)
                 keyframe.handle_right[0] = new_x_right
                 keyframe.handle_right[1] = new_y_right
         
@@ -2130,34 +2108,47 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
                 self.initial_mouse_x += (new_x - event.mouse_x)
                 context.window.cursor_warp(new_x, event.mouse_y)
             
-            base_divisor = 1000.0 if event.alt else 200.0
+            if event.mouse_y < 5 or event.mouse_y > context.window.height - 5:
+                if event.mouse_y < 5:
+                    new_y = context.window.height - 10
+                else:
+                    new_y = 10
+                self.initial_mouse_y += (new_y - event.mouse_y)
+                context.window.cursor_warp(event.mouse_x, new_y)
+            # Rotation (X-Achse)
+            base_divisor_x = 1000.0 if event.alt else 200.0
             delta_x = (event.mouse_x - self.initial_mouse_x) * 0.1
-            
-            # Verhindere, dass delta_x negativ wird
             delta_x = max(0.0, delta_x)
+            power_exponent_x = 2.0
+            strength_rotation = (delta_x / base_divisor_x) ** power_exponent_x
             
-            power_exponent = 2.0
-            strength = (delta_x / base_divisor) ** power_exponent
+            # Extrusion (Y-Achse)
+            base_divisor_y = 1000.0 if event.alt else 200.0
+            delta_y = (self.initial_mouse_y - event.mouse_y) * -0.6 # Invertiert für intuitive Steuerung
+            delta_y = max(0.0, delta_y)
+            power_exponent_y = 2.0
+            strength_extrusion = (delta_y / base_divisor_y) ** power_exponent_y
             
-            self._current_strength = strength
-            self._apply_randomized_extrusion(context, self._current_strength)
-            #self.report({'INFO'}, f"Strength: {10000 *self._current_strength:.2f}, Seed: {self._current_seed}")
+            self._current_strength_rotation = strength_rotation
+            self._current_strength_extrusion = strength_extrusion
+            self._apply_randomized_extrusion(context, self._current_strength_rotation, self._current_strength_extrusion)
+            
+            self.report({'INFO'}, f"Rotation: {10000 * self._current_strength_rotation:.0f} | Extrusion: {10 * self._current_strength_extrusion:.0f} | Seed: {self._current_seed}")
             return {'RUNNING_MODAL'}
             
         elif event.type == 'WHEELUPMOUSE':
             self._current_seed += 1
-            self._apply_randomized_extrusion(context, self._current_strength)
-            self.report({'INFO'}, f"Seed: {self._current_seed}")
+            self._apply_randomized_extrusion(context, self._current_strength_rotation, self._current_strength_extrusion)
+            self.report({'INFO'}, f"Rotation: {10000 * self._current_strength_rotation:.0f} | Extrusion: {10 * self._current_strength_extrusion:.0f} | Seed: {self._current_seed}")
             return {'RUNNING_MODAL'}
         
         elif event.type == 'WHEELDOWNMOUSE':
             self._current_seed -= 1
-            self._apply_randomized_extrusion(context, self._current_strength)
-            self.report({'INFO'}, f"Strength: {self._current_strength:.6f}, Seed: {self._current_seed}")
+            self._apply_randomized_extrusion(context, self._current_strength_rotation, self._current_strength_extrusion)
+            self.report({'INFO'}, f"Rotation: {10000 * self._current_strength_rotation:.0f} | Extrusion: {10 * self._current_strength_extrusion:.0f} | Seed: {self._current_seed}")
             return {'RUNNING_MODAL'}
 
         elif event.type == 'LEFTMOUSE':
-            # Iteriere über alle initial gespeicherten Keyframes
             for (data_path, keyframe_index, array_index), initial_vectors in self.initial_handle_vectors.items():
                 fcurve = None
                 for fc in context.active_object.animation_data.action.fcurves:
@@ -2165,7 +2156,6 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
                         fcurve = fc
                         break
                 
-                # Wenn der Keyframe noch existiert, setze die Handle-Typen
                 if fcurve and keyframe_index < len(fcurve.keyframe_points):
                     keyframe = fcurve.keyframe_points[keyframe_index]
                     keyframe.handle_left_type = 'ALIGNED'
@@ -2213,7 +2203,7 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
         if not context.selected_visible_fcurves or not [kf for fc in context.selected_visible_fcurves for kf in fc.keyframe_points if kf.select_control_point]:
             self.report({'WARNING'}, "Keine Keyframes in den aktiven, sichtbaren Kurven ausgewählt.")
             return {'CANCELLED'}
-        
+            
         self._initial_frame_start = context.scene.frame_start
         self._initial_frame_end = context.scene.frame_end
         
@@ -2224,62 +2214,42 @@ class OBJECT_OT_randomize_handle_rotation(bpy.types.Operator):
             context.scene.frame_current = context.scene.frame_start
         
         self.initial_mouse_x = event.mouse_x
+        self.initial_mouse_y = event.mouse_y # Neu
         self.initial_handle_vectors.clear()
         self.initial_handle_types.clear()
-        self._current_strength = 0.0
+        self._current_strength_rotation = 0.0
+        self._current_strength_extrusion = 0.0 # Neu
         self._current_seed = 0
 
         selected_keyframes_found = False
         for fcurve in context.selected_visible_fcurves:
             for keyframe_index, keyframe in enumerate(fcurve.keyframe_points):
                 if keyframe.select_control_point:
+                    # DEAKTIVIERUNG: Wir setzen 'selected_keyframes_found' auf True,
+                    # wenn ein Keyframe ausgewählt ist, und speichern sofort die Daten,
+                    # ohne auf ungleiche Nachbarn zu prüfen.
+                    selected_keyframes_found = True 
+                    key = (fcurve.data_path, keyframe_index, fcurve.array_index)
                     
-                    # Wert des aktuellen Keyframes
-                    current_value = keyframe.co[1]
-                    
-                    # Checke, ob der Wert des vorherigen oder nächsten Keyframes anders ist
-                    has_different_neighbor = False
-                    num_decimals = 6  # Definiere die Anzahl der Nachkommastellen
-
-                    # Runde den aktuellen Wert für den Vergleich
-                    rounded_current_value = round(current_value, num_decimals)
-
-                    if keyframe_index > 0:
-                        prev_keyframe = fcurve.keyframe_points[keyframe_index - 1]
-                        # Runde auch den Wert des vorherigen Keyframes
-                        rounded_prev_value = round(prev_keyframe.co[1], num_decimals)
-                        
-                        if rounded_prev_value != rounded_current_value:
-                            has_different_neighbor = True
-
-                    if keyframe_index < len(fcurve.keyframe_points) - 1:
-                        next_keyframe = fcurve.keyframe_points[keyframe_index + 1]
-                        # Runde auch den Wert des nächsten Keyframes
-                        rounded_next_value = round(next_keyframe.co[1], num_decimals)
-                        
-                        if rounded_next_value != rounded_current_value:
-                            has_different_neighbor = True
-                    
-                    if has_different_neighbor:
-                        selected_keyframes_found = True
-                        key = (fcurve.data_path, keyframe_index, fcurve.array_index)
-                        
-                        self.initial_handle_types[key] = {
-                            'left': keyframe.handle_left_type,
-                            'right': keyframe.handle_right_type
-                        }
-                        self.initial_handle_vectors[key] = {
-                            'left': (keyframe.handle_left[0] - keyframe.co[0], keyframe.handle_left[1] - keyframe.co[1]),
-                            'right': (keyframe.handle_right[0] - keyframe.co[0], keyframe.handle_right[1] - keyframe.co[1]),
-                        }
+                    self.initial_handle_types[key] = {
+                        'left': keyframe.handle_left_type,
+                        'right': keyframe.handle_right_type
+                    }
+                    self.initial_handle_vectors[key] = {
+                        'left': (keyframe.handle_left[0] - keyframe.co[0], keyframe.handle_left[1] - keyframe.co[1]),
+                        'right': (keyframe.handle_right[0] - keyframe.co[0], keyframe.handle_right[1] - keyframe.co[1]),
+                    }
 
         if not selected_keyframes_found:
             self.report({'WARNING'}, "Neighbouring keys have the same value")
+            context.scene.frame_start = self._initial_frame_start
+            context.scene.frame_end = self._initial_frame_end
             return {'CANCELLED'}
-        
-        context.window.cursor_set('SCROLL_X')
+            
+        context.window.cursor_set('SCROLL_XY') # Cursor zeigt jetzt in beide Richtungen
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
+
 
 
 class OBJECT_OT_slide_handles(bpy.types.Operator):
@@ -2765,7 +2735,7 @@ class OBJECT_OT_scale_handles(bpy.types.Operator):
     bl_idname = "object.scale_handles"
     bl_label = "scale handles"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Mousewheel for Y- or X-Axis"
+    bl_description = "Scale handles in initial direction. Mousewheel for Y- or X-Axis"
     
     _timer = None
     initial_mouse_x = None
@@ -3009,7 +2979,7 @@ class OBJECT_OT_extrude_slide_handles_between_frames(bpy.types.Operator):
     bl_idname = "object.extrude_slide_handles_between_frames"
     bl_label = "slide batches"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Select two consecutive keyframes. Mousewheel for Extrude or Slide on X-Axis. Hold ALT for Y-Axis"
+    bl_description = "Select two consecutive keyframes. Mousewheel to Extrude or Slide in X direction"
     
     _timer = None
     initial_mouse_x = None
@@ -3275,7 +3245,7 @@ class OBJECT_OT_extrude_handles_between_frames(bpy.types.Operator):
     bl_idname = "object.extrude_handles_between_frames"
     bl_label = "extrude_handles_between_frames"
     bl_options = {'REGISTER', 'UNDO'}
-    bl_description = "Mousewheel for Extrude or Slide on Initial-Axis. Select two consecutive keyframes"
+    bl_description = "Select two consecutive keyframes. Mousewheel to Extrude or Slide in initial direction"
     
     _timer = None
     initial_mouse_x = None
@@ -3844,106 +3814,9 @@ class OBJECT_OT_move_keys_to_cursor(bpy.types.Operator):
         
 
 
-class GRAPH_PT_sub_options1(bpy.types.Panel):
-    bl_label = "Advanced"
-    bl_idname = "GRAPH_PT_sub_options_advanced1"  # Eindeutige ID
-    bl_parent_id = "GRAPH_PT_handle_manipulator"
-    bl_space_type = 'GRAPH_EDITOR'
-    bl_region_type = 'UI'
-
-    def draw(self, context):
-        layout = self.layout
-        scene = context.scene 
-        button_height_scale = 1.4
-        factor = 1/1.5
-        sep2 = button_height_scale/factor
-        sep1 = factor
-        col = layout.column(align=True)
-        col.scale_y = button_height_scale
-        
-        #basics
-        
-        row = col.row(align=True)
-        row.operator(OBJECT_OT_manipulate_handles.bl_idname, text="Left/Right",icon='HANDLE_ALIGNED') 
-        
-        row = col.row(align=True)
-        row.operator("graph.move_keyframes_x",icon='TRACKING_FORWARDS_SINGLE')
-        
-        row = col.row(align=True)
-        row.operator("object.extrude_handles_between_frames", text="Extrude/Slide I",icon='AREA_SWAP')
-        
-        
-        
-        
-        
-        
-        
-        col.label(text="Randomize")
-        row = col.row(align=True)
-        row.operator("object.randomize_handle_extrusion", text="Extrusion",icon='HANDLE_ALIGNED')
-        row.operator("object.randomize_handle_rotation", text="Rotation",icon='GESTURE_ROTATE')
-        
-        row = col.row(align=True)
-        row.operator("object.random_x_pos", text="X-Value",icon='TRACKING_FORWARDS_SINGLE')   
-        row.operator("OBJECT_OT_randomize_keys", text="Y-Value",icon='EMPTY_SINGLE_ARROW')
-        
-        #col.separator(factor= sep1)
-        row = col.row(align=True)
-        row.prop(context.scene, "use_bone_randomization", toggle=True, text="On bones",icon='BONE_DATA')
 
 
-class GRAPH_PT_sub_options2(bpy.types.Panel):
-    bl_label = "Options"
-    bl_idname = "GRAPH_PT_sub_options_advanced2"  # Eindeutige ID
-    bl_parent_id = "GRAPH_PT_handle_manipulator"
-    bl_space_type = 'GRAPH_EDITOR'
-    bl_region_type = 'UI'
 
-    def draw(self, context):
-        layout = self.layout
-        scene = context.scene 
-        button_height_scale = 1.4
-        factor = 1/1.5
-        sep2 = button_height_scale/factor
-        sep1 = factor
-        col = layout.column(align=True)
-        col.scale_y = button_height_scale
-        
-        #options
-        #col.label(text="Options")
-        if context.active_object and context.active_object.type == 'ARMATURE':
-            row = col.row(align=True)
-            # Verwende den Operator anstelle der Property
-            row.operator(OBJECT_OT_toggle_bones_isolation.bl_idname, text="Isolate Bones", icon='POINTCLOUD_POINT')
-        else:
-            col.label(text="Isolate Bones (Select Armature)")
-        col.operator("object.move_keys_to_cursor", text="Set to cursor",icon='TRIA_UP')
-        col.operator("graph.decimate_unselected", text="Decimate",icon='MOD_DECIM')
-        
-        
-        col.separator(factor=sep1)
-        filter_row = col.row(align=True)
-        filter_row.scale_x = 0.8
-        filter_row.scale_y = button_height_scale/1.5
-        filter_row.prop(scene, "filter_loc", toggle=True, text="Loc",icon='CON_LOCLIKE')
-        filter_row.prop(scene, "filter_rot", toggle=True, text="Rot",icon='ORIENTATION_GIMBAL')
-        filter_row.prop(scene, "filter_scale", toggle=True, text="Scale",icon='ORIENTATION_LOCAL')
-
-        filter_row = col.row(align=True)
-        filter_row.scale_x = 0.8
-        filter_row.scale_y = button_height_scale/1.5
-        filter_row.prop(scene, "filter_x", toggle=True, text="X",icon='NODE_SOCKET_MATERIAL')
-        filter_row.prop(scene, "filter_y", toggle=True, text="Y",icon='NODE_SOCKET_SHADER')
-        filter_row.prop(scene, "filter_z", toggle=True, text="Z",icon='NODE_SOCKET_STRING')
-        
-        col.separator(factor=sep1)
-        row = col.row(align=True)
-        row.prop(context.scene, "keep_framerange", toggle=True, text="Normal Range",icon='TIME')
-
-        row = col.row(align=True)
-        row.prop(scene, "additional_preframes", text="Preframes")
-        row.prop(scene, "additional_postframes", text="Postframes")
-        
         
         
         
@@ -4016,7 +3889,15 @@ class GRAPH_PT_sub_options5(bpy.types.Panel):
         row.operator("object.manipulate_right_handles", text="asd")'''
         
         
-        
+def update_filter_loc(self, context):
+    if self.filter_loc:
+        self.filter_rot = False
+    filter_fcurves(self, context)
+
+def update_filter_rot(self, context):
+    if self.filter_rot:
+        self.filter_loc = False
+    filter_fcurves(self, context)      
 
 class GRAPH_PT_handle_manipulator(bpy.types.Panel):
     bl_label = "Handle Manipulator"
@@ -4024,6 +3905,218 @@ class GRAPH_PT_handle_manipulator(bpy.types.Panel):
     bl_space_type = 'GRAPH_EDITOR'
     bl_region_type = 'UI'
     bl_category = "Tools"
+
+    def draw(self, context):
+            layout = self.layout
+            scene = context.scene 
+            button_height_scale = 1.4
+            factor = 1/1.5
+            sep2 = button_height_scale/factor
+            sep1 = factor
+            
+            # Haupt-Split für 2 Spalten
+            # Der 'factor' (z.B. 0.6) bestimmt die Breite der linken Spalte
+            split = layout.split(factor=0.6, align=False) 
+
+            # Linke Spalte für Operatoren (Buttons)
+            col_left = split.column(align=True)
+            col_left.scale_y = button_height_scale
+            
+            # Rechte Spalte für Optionen (Toggles/Props)
+            col_right = split.column(align=True)
+            col_right.scale_y = button_height_scale # Gleiche Skalierung für Konsistenz
+
+            
+            # --- Linke Spalte: Operatoren (Buttons) ---
+            
+            col_left.label(text="Tools", icon='TOOL_SETTINGS') # Optional: Überschrift
+
+
+
+            
+            
+            
+            col_left.separator(factor=sep1)
+            col_left.operator(OBJECT_OT_scale_handles.bl_idname, text="Scale",icon='HANDLE_ALIGNED')
+            col_left.operator(OBJECT_OT_manipulate_handles.bl_idname, text="Left/Right",icon='ARROW_LEFTRIGHT')
+            # Quick Buttons
+            
+            
+            
+            
+            col_left.separator(factor=sep1)
+            # Erste Reihe: Zwei Buttons in einer Row
+            row = col_left.row(align=False)
+            row.operator("OBJECT_OT_rotate_keys", text="Rotate",icon='GESTURE_ROTATE') 
+            # HINWEIS: OBJECT_OT_toggle_bones_isolation ist unten, da es eine Option sein kann
+            
+            # Weitere Buttons
+            col_left.operator("OBJECT_OT_flatten_keys", text="Exaggerate",icon='FORCE_HARMONIC') 
+            
+            
+            
+            col_left.separator(factor=sep1)
+            col_left.operator("object.randomize_handle_rotation", text="Randomize",icon='RNDCURVE')
+            row = col_left.row(align=True)
+            row.operator("object.random_x_pos", text="X")
+            row.operator("OBJECT_OT_randomize_keys", text="Y")
+            
+            
+            
+            col_left.separator(factor=sep1)
+            col_left.operator("graph.move_keyframes_x",text="Key Grab",icon='TRACKING_FORWARDS_SINGLE')
+            col_left.operator("graph.scale_keyframes_x", text="Key Scale",icon='CENTER_ONLY')
+            
+            
+            
+            
+            
+            
+            col_left.separator(factor=sep1)
+            col_left.operator("object.extrude_handles_between_frames", text="Extrude/Slide",icon='AREA_SWAP')
+            col_left.separator(factor=sep1)
+            
+            
+            
+            
+            #col_left.label(text="Randomize", icon='RNDCURVE') # Optional: Überschrift
+            
+            
+            
+            
+            
+            
+            
+            
+            
+            # Den Isolate Bones Button habe ich hier gelassen, da er oft als Operator dient
+            
+            
+            
+            # --- Rechte Spalte: Optionen (Toggles/Props) ---
+            
+            col_right.label(text="Options", icon='SETTINGS') # Optional: Überschrift
+
+            # Filter Toggles
+            # Skalierung zurücksetzen oder anpassen für kleinere Toggles
+            
+            
+            col_right.separator(factor=sep1)
+            # On bones Toggle
+            
+            col_right.operator(OBJECT_OT_toggle_bones_isolation.bl_idname, text="Isolate",icon='BONE_DATA')
+            
+            filter_row = col_right.row(align=True)
+            #filter_row.scale_x = 1.0 # Standardbreite für Toggles
+            #filter_row.scale_y = button_height_scale / 1.5 # Kleinere Höhe
+            filter_row.prop(scene, "filter_loc", toggle=True, text="Loc")
+            filter_row.prop(scene, "filter_rot", toggle=True, text="Rot")
+            
+            
+            
+            
+            
+            
+            
+            #col_right.separator(factor=3.4)
+            col_right.separator(factor=sep1)
+            
+            col_right.prop(context.scene, "keep_framerange", toggle=True, text="Normal Range",icon='TIME')
+            col_right.separator(factor=sep1)
+            
+            col_right.prop(scene, "additional_preframes", text="Preframes")
+            col_right.prop(scene, "additional_postframes", text="Postframes")
+            
+            
+            
+            
+            # Normal Range Toggle
+            #col_right.separator(factor=sep1)
+            col_right.separator(factor=3.4)
+            #col_right.separator(factor=sep1)
+            col_right.prop(context.scene, "use_bone_randomization", toggle=True, text="On bone",icon='RNDCURVE')
+            #col_right.separator(factor=3.4)
+            col_right.separator(factor=sep1)
+            col_right.operator("graph.decimate_unselected", text="Decimate",icon='MOD_DECIM')        
+            
+            col_right.separator(factor=sep1)
+            col_right.operator("object.move_keys_to_cursor", text="Set to cursor",icon='TRIA_UP')
+            
+            
+
+            
+            
+            
+
+            
+            
+            
+            
+            
+            
+            
+            
+        
+        
+class GRAPH_PT_sub_options2(bpy.types.Panel):
+    bl_label = "All Options"
+    bl_idname = "GRAPH_PT_sub_options_advanced2"  # Eindeutige ID
+    bl_parent_id = "GRAPH_PT_handle_manipulator"
+    bl_space_type = 'GRAPH_EDITOR'
+    bl_region_type = 'UI'
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene 
+        button_height_scale = 1.4
+        factor = 1/1.5
+        sep2 = button_height_scale/factor
+        sep1 = factor
+        col = layout.column(align=True)
+        col.scale_y = button_height_scale
+        
+        #options
+        #col.label(text="Options")
+        
+        
+        
+        
+        #col.separator(factor=sep1)
+        filter_row = col.row(align=True)
+        filter_row.scale_x = 0.8
+        filter_row.scale_y = button_height_scale/1.5
+        filter_row.prop(scene, "filter_loc", toggle=True, text="Loc",icon='CON_LOCLIKE')
+        filter_row.prop(scene, "filter_rot", toggle=True, text="Rot",icon='ORIENTATION_GIMBAL')
+        filter_row.prop(scene, "filter_scale", toggle=True, text="Scale",icon='ORIENTATION_LOCAL')
+
+        filter_row = col.row(align=True)
+        filter_row.scale_x = 0.8
+        filter_row.scale_y = button_height_scale/1.5
+        filter_row.prop(scene, "filter_x", toggle=True, text="X",icon='NODE_SOCKET_MATERIAL')
+        filter_row.prop(scene, "filter_y", toggle=True, text="Y",icon='NODE_SOCKET_SHADER')
+        filter_row.prop(scene, "filter_z", toggle=True, text="Z",icon='NODE_SOCKET_STRING')
+        
+        col.separator(factor=sep1)
+        row = col.row(align=True)
+        row.prop(context.scene, "keep_framerange", toggle=True, text="Normal Range",icon='TIME')
+
+        row = col.row(align=True)
+        row.prop(scene, "additional_preframes", text="Preframes")
+        row.prop(scene, "additional_postframes", text="Postframes")
+        
+        col.separator(factor=sep1)
+        col.operator(OBJECT_OT_toggle_bones_isolation.bl_idname, text="Isolate Bones", icon='POINTCLOUD_POINT')
+        col.operator("object.move_keys_to_cursor", text="Set to cursor",icon='TRIA_UP')
+        col.operator("graph.decimate_unselected", text="Decimate",icon='MOD_DECIM')        
+        
+
+
+class GRAPH_PT_sub_options1(bpy.types.Panel):
+    bl_label = "All Operators"
+    bl_idname = "GRAPH_PT_sub_options_advanced1"  # Eindeutige ID
+    bl_parent_id = "GRAPH_PT_handle_manipulator"
+    bl_space_type = 'GRAPH_EDITOR'
+    bl_region_type = 'UI'
 
     def draw(self, context):
         layout = self.layout
@@ -4036,30 +4129,78 @@ class GRAPH_PT_handle_manipulator(bpy.types.Panel):
         col.scale_y = button_height_scale
         
         #basics
+        
+        
+        #basics
         row = col.row(align=True)
         row.operator(OBJECT_OT_scale_handles.bl_idname, text="Scale Handles",icon='ORIENTATION_VIEW')
         #col.separator(factor=sep1)
         
+        row = col.row(align=True)
+        row.operator(OBJECT_OT_manipulate_handles.bl_idname, text="Left/Right",icon='HANDLE_ALIGNED') 
         
+        col.separator(factor=sep1)
         row = col.row(align=True)
         row.operator("OBJECT_OT_rotate_keys", text="Rotate",icon='GESTURE_ROTATE') 
         row.operator("OBJECT_OT_flatten_keys", text="Flatten",icon='REMOVE') 
         
+        
         col.separator(factor=sep1)
         row = col.row(align=True)
-        row.operator("object.extrude_slide_handles_between_frames", text="Extrude/Slide X/Y",icon='AREA_SWAP')
-        
-        #col.separator(factor=sep1)
+        row.operator("object.extrude_slide_handles_between_frames", text="Extrude/Slide X",icon='AREA_SWAP')
         row = col.row(align=True)
-        row.operator("graph.scale_keyframes_x",icon='CENTER_ONLY')
+        row.operator("object.extrude_handles_between_frames", text="Extrude/Slide I",icon='AREA_SWAP')
+        
+        col.separator(factor=sep1)
+        
+        
+        row = col.row(align=True)
+        row.operator("graph.move_keyframes_x",icon='TRACKING_FORWARDS_SINGLE')
+        
+        row = col.row(align=True)
+        row.operator("graph.scale_keyframes_x", text="Key Scale",icon='CENTER_ONLY')
         
         
         
         
+        
+        
+        
+        col.label(text="Randomize")
+        row = col.row(align=True)
+        row.operator("object.randomize_handle_extrusion", text="Extrusion",icon='HANDLE_ALIGNED')
+        row.operator("object.randomize_handle_rotation", text="Rotation",icon='GESTURE_ROTATE')
+        
+        row = col.row(align=True)
+        row.operator("object.random_x_pos", text="X-Value",icon='TRACKING_FORWARDS_SINGLE')   
+        row.operator("OBJECT_OT_randomize_keys", text="Y-Value",icon='EMPTY_SINGLE_ARROW')
+        
+        #col.separator(factor= sep1)
+        row = col.row(align=True)
+        row.prop(context.scene, "use_bone_randomization", toggle=True, text="On bones",icon='BONE_DATA')
         
         
         
 
+
+
+class VIEW3D_OT_toggle_playback_sync(bpy.types.Operator):
+    """Schaltet zwischen Play Every Frame ('NONE') und Frame Dropping ('FRAME_DROP') um"""
+    bl_idname = "screen.toggle_playback_sync_mode"
+    bl_label = "Toggle Playback Sync Mode"
+
+    def execute(self, context):
+        current_sync_mode = context.scene.sync_mode
+        
+        # Umschalten: FRAME_DROP -> NONE, sonst (z.B. NONE/AUDIO_SYNC) -> FRAME_DROP
+        if current_sync_mode == 'FRAME_DROP':
+            context.scene.sync_mode = 'NONE'
+            self.report({'INFO'}, "Play Every Frame")
+        else:
+            context.scene.sync_mode = 'FRAME_DROP'
+            self.report({'INFO'}, "Frame Dropping")
+
+        return {'FINISHED'}
 
 addon_keymaps = []
 
@@ -4090,9 +4231,13 @@ def register():
     bpy.utils.register_class(OBJECT_OT_toggle_bones_isolation)
     bpy.utils.register_class(GRAPH_PT_sub_options2)
     bpy.utils.register_class(GRAPH_PT_sub_options1)
+    bpy.utils.register_class(VIEW3D_OT_toggle_playback_sync)
+    
     #bpy.utils.register_class(GRAPH_PT_sub_options3)
     #bpy.utils.register_class(GRAPH_PT_sub_options4)
     #bpy.utils.register_class(GRAPH_PT_sub_options5)
+
+    # ... die anderen Properties
     
     
     
@@ -4107,6 +4252,8 @@ def register():
     bpy.types.Scene.filter_y = bpy.props.BoolProperty(name="Y Axis Filter", default=False, update=filter_fcurves)
     bpy.types.Scene.filter_z = bpy.props.BoolProperty(name="Z Axis Filter", default=False, update=filter_fcurves)
     
+    bpy.types.Scene.filter_loc = bpy.props.BoolProperty(name="Location Filter", default=False, update=update_filter_loc)
+    bpy.types.Scene.filter_rot = bpy.props.BoolProperty(name="Rotation Filter", default=False, update=update_filter_rot)
     
     bpy.types.Scene.vorschau = bpy.props.IntProperty(
         name="Vorschau",
@@ -4125,7 +4272,13 @@ def register():
         step=10,
         description="Frames after last selection"
     )
-    
+    bpy.types.Scene.extrusion_strength = bpy.props.IntProperty(
+        name="Extrusion Strength",
+        default=0, # default-Wert als ganze Zahl
+        min=0,
+        max=100,
+        description="Controls the strength of the extrusion randomization additional to rotation"
+    )
     
     kc = bpy.context.window_manager.keyconfigs.addon
     if kc:
@@ -4158,8 +4311,16 @@ def register():
             value='PRESS'
         )
         kmi_play_pause = km.keymap_items.new(
-            'screen.animation_play',  # Der Operator für Play/Pause
-            type='NUMPAD_4',  # Die Taste
+            'screen.animation_play', 
+            type='NUMPAD_4', 
+            value='PRESS'
+        )
+        kmi_play_pause.properties.reverse = False # Ist standardmäßig False
+        #kmi_play_pause.properties.sync = False   # Ist standardmäßig False
+        
+        kmi_toggle_sync = km.keymap_items.new(
+            VIEW3D_OT_toggle_playback_sync.bl_idname,  # Hier kommt der bl_idname des neuen Operators rein
+            type='NUMPAD_6',  # Die gewünschte Taste
             value='PRESS'
         )
         
@@ -4200,10 +4361,13 @@ def unregister():
     #bpy.utils.unregister_class(GRAPH_PT_sub_options3)
     #bpy.utils.unregister_class(GRAPH_PT_sub_options4)
     #bpy.utils.unregister_class(GRAPH_PT_sub_options5)
+    bpy.utils.unregister_class(VIEW3D_OT_toggle_playback_sync)
+   
 
 
     del bpy.types.Scene.vorschau
     del bpy.types.Scene.nachschau
+    del bpy.types.Scene.extrusion_strength
     
 
     del bpy.types.Scene.filter_loc
@@ -4212,6 +4376,7 @@ def unregister():
     del bpy.types.Scene.filter_x
     del bpy.types.Scene.filter_y
     del bpy.types.Scene.filter_z
+    
     
     for km in addon_keymaps:
         bpy.context.window_manager.keyconfigs.addon.keymaps.remove(km)
